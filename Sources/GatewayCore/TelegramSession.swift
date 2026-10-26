@@ -7,12 +7,16 @@ public struct AccountInfo: Sendable, Equatable {
     public var displayName: String
     public var username: String?
     public var phoneLast4: String?
+    /// The whole number in international form (`+15551234567`). Only the link to Volgenic
+    /// sends it (docs/link.md `hello`); the local API shows the last four digits.
+    public var phoneNumber: String?
 
-    public init(userId: Int64, displayName: String, username: String?, phoneLast4: String?) {
+    public init(userId: Int64, displayName: String, username: String?, phoneLast4: String?, phoneNumber: String? = nil) {
         self.userId = userId
         self.displayName = displayName
         self.username = username
         self.phoneLast4 = phoneLast4
+        self.phoneNumber = phoneNumber
     }
 
     public var json: JSONValue {
@@ -178,7 +182,8 @@ public actor TelegramSession: ManagedTelegramSession {
         let phone = me.string("phone_number") ?? ""
         return AccountInfo(
             userId: me.int64("id") ?? 0, displayName: name, username: Translator.username(me.object("usernames")),
-            phoneLast4: phone.isEmpty ? nil : String(phone.suffix(4))
+            phoneLast4: phone.isEmpty ? nil : String(phone.suffix(4)),
+            phoneNumber: phone.isEmpty ? nil : (phone.hasPrefix("+") ? phone : "+" + phone)
         )
     }
 
