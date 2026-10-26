@@ -21,6 +21,8 @@ minute as seconds. [architecture.md](architecture.md) explains how the parts fit
   the API; a few open TDLib directly for debugging and refuse to run while the gateway is up.
 - **TGW_HOME** — the data directory, `~/Library/Application Support/TelegramGateway` unless
   the environment variable of that name says otherwise.
+- **Link** — an outbound WebSocket from the gateway to a Volgenic server, over which that
+  Volgenic account drives the gateway ([link.md](link.md)). Managed with `tgw link`.
 
 ## Prerequisites
 
@@ -75,7 +77,13 @@ the event log (paging, pruning, the `410` rule), grants (the intersection with t
 set, scope checks, revocation), access requests (expiry, approval, purge), the translation of
 every TDLib update the gateway handles, monitoring (folders, member-count coalescing,
 backfill after a gap), webhook delivery (batching, signatures, the retry schedule), the media
-cache, the secret store, and every HTTP route and WebSocket close code.
+cache, the secret store, every HTTP route and WebSocket close code, and the link to Volgenic
+(hello, requests through the admin API, refused paths, subscribe with backlog, live events
+and `gap`, `auth_state`, the stop on `401` and `4401`, reconnecting, and reloading links).
+
+The link tests start a stand-in for Volgenic inside the test process: a WebSocket server on
+`127.0.0.1` at a port the system picks, plus a plain server that answers every request with
+`401`. They use loopback only, never the network.
 
 Two things make that possible, and new code should keep to them:
 
@@ -83,7 +91,8 @@ Two things make that possible, and new code should keep to them:
   `TDLibRequesting`. Tests substitute `FakeTDLib`, which answers from fixtures written from
   TDLib's schema (`vendor/tdlib/src/td/generate/scheme/td_api.tl`).
 - Time goes through `GatewayClock`. Tests use `ManualClock` to move through expiries,
-  batching delays and retry schedules without waiting.
+  batching delays and retry schedules without waiting. The link's reconnect delays are in
+  `LinkTiming`, which the link tests shorten to milliseconds.
 
 Run one suite with `swift test --filter GatewayCoreTests.MonitorTests`.
 
@@ -148,8 +157,9 @@ launchd   state = running, pid = 61192
 lock      held by pid 61192 (daemon)
 health    ok auth=ready head_seq=4812 on port 41414
 
-$ tgw daemon reload            # re-read config.json: api_id / api_hash take effect now
+$ tgw daemon reload            # re-read config.json: api_id / api_hash and links take effect now
 reloaded  telegram started
+link      started https://volgenic.com
 $ tgw daemon restart           # launchctl kickstart: applies every setting, including port
 restarted local.telegram-gateway
 $ tgw daemon logs -n 50        # add -f to follow
@@ -191,6 +201,7 @@ seen) answers `503 not_logged_in`.
 | `media_cache_max_bytes` | `2147483648` | Size at which the least recently served media files are evicted. |
 | `secrets` | `"file"` | `"file"` or `"keychain"`; see [Secrets](#secrets). |
 | `daemon_path` | none | Written by the menu bar app for its launcher; the gateway ignores it. |
+| `links` | `[]` | Links to Volgenic, `[{"base_url": "https://volgenic.com"}]`. Written by `tgw link`; see [tgw link](#tgw-link). |
 
 Environment variables, read by the gateway and by `tgw`:
 
@@ -210,10 +221,10 @@ Environment variables, read by the gateway and by `tgw`:
 
 Flags win over environment variables, which win over the file.
 
-Changes to `api_id` and `api_hash` take effect on reload: `tgw daemon reload` (or
+Changes to `api_id`, `api_hash` and `links` take effect on reload: `tgw daemon reload` (or
 `POST /v1/admin/reload` with the admin token) makes the running gateway re-read
-`config.json` and start, replace or drop its Telegram session in place, without touching the
-event log, grants or open connections. Every other key needs a restart; the reload response
+`config.json`, start, replace or drop its Telegram session in place, and start, restart or
+close its links, without touching the event log, grants or open connections. Every other key needs a restart; the reload response
 lists the ones that changed under `restart_required`.
 
 ## Where data lives
@@ -221,7 +232,7 @@ lists the ones that changed under `restart_required`.
 ```
 ~/Library/Application Support/TelegramGateway/
   config.json      see above
-  secrets.json     the admin token and TDLib's database key (mode 0600)
+  secrets.json     the admin token, TDLib's database key and the link tokens (mode 0600)
   gateway.sqlite   the gateway's store: monitored set, chat and folder cache, event log,
                    per-chat cursors, access requests, grants, webhook deliveries, media index
   tdlib/           TDLib's directory: td.binlog, db.sqlite (encrypted), files/ (downloads)
@@ -238,12 +249,13 @@ everything else, use the menu bar app or `POST /v1/admin/auth/logout`.
 
 ## Secrets
 
-The gateway has two secrets:
+The gateway has these secrets:
 
 | Key | What it is | Created |
 |---|---|---|
 | `admin-token` | The token (`tgw_…`) that may call `/v1/admin/*`. `tgw` and the menu bar app send it. | By the gateway on first run. |
 | `tdlib-db-key` | 32 random bytes with which TDLib encrypts `db.sqlite`. Without it the local database is unreadable and you log in again. | When TDLib is first opened. |
+| `link-token:<base_url>` | The token (`vgl_…`) of the link to that Volgenic server, one per link ([link.md](link.md)). | By `tgw link add`; deleted by `tgw link remove`. |
 
 They are kept in a secret store chosen by `secrets` in `config.json`:
 
@@ -270,6 +282,8 @@ What follows from this when you work on the code:
   and you log in to Telegram again.
 
 `tgw secrets` shows which store is in use and which keys exist, never their values.
+`tgw link add` writes a link token to the same store as the admin token, so while developing
+it goes to `secrets.json` and never to the Keychain.
 `tgw secrets regenerate-admin-token` replaces the admin token; restart the gateway
 afterwards.
 
@@ -289,10 +303,13 @@ account       Ada Lovelace (@ada) id=123456789 phone=…4567
 events        head_seq=4812  oldest_seq=1  last_hour=37
 monitored     2 chats   grants 1   webhooks active=1 retrying=0 paused=0
 backfill      in_progress=false chats_pending=0   media_cache=184320 bytes
+link          https://volgenic.com  connected since 2026-09-29T09:00:13.120Z
 started       2026-09-29T09:00:12.004Z
 ```
 
-Without an admin token it prints only what the unauthenticated health check returns.
+Without an admin token it prints only what the unauthenticated health check returns. Each
+link to Volgenic gets a `link` line with its state, and its last error when it is not
+connected.
 
 ### `tgw monitor`
 
@@ -388,6 +405,41 @@ It calls `POST /v1/chats/{chat_id}/messages` with the admin token
 to monitored chats. The message reaches everyone in the chat. Never point it at a real chat
 while developing or testing: tests use the fake TDLib and send nothing.
 
+### `tgw link`
+
+Links to Volgenic ([link.md](link.md)): the gateway dials out to a Volgenic server and that
+Volgenic account drives it, with the admin token's powers except secrets, including sending
+messages as you. Volgenic shows the `add` command, with its token, when you link a gateway.
+
+```
+$ tgw link add https://volgenic.com vgl_q3Jf…
+added link to https://volgenic.com
+state     connected since 2026-10-26T14:03:07.412Z
+
+$ tgw link list
+base_url               connected  state         since                     last error
+https://volgenic.com   yes        connected     2026-10-26T14:03:07.412Z  -
+http://localhost:4100  no         unauthorized  2026-10-26T14:05:40.003Z  Volgenic refused the link token (HTTP 401); add the link again with a new token
+
+$ tgw link remove http://localhost:4100
+removed link to http://localhost:4100
+```
+
+`add` stores the URL in `config.json` and the token in the secret store, then reloads the
+running gateway, which connects at once; for a base URL that already has a link it replaces
+the token. `remove` deletes both and closes the link. `list` asks the running gateway for
+each link's state (`connecting`, `connected`, `waiting`, `unauthorized`, `no_token`,
+`stopped`), when it entered it, and the last error. A link Volgenic refused stays
+`unauthorized` until you run `add` again or reload. With the gateway stopped, `add` and
+`remove` only change the files, and the gateway applies them when it starts.
+
+The token is an argument, so it lands in your shell history; it is worthless once the link
+is revoked in Volgenic.
+
+To try a link while developing, run a second gateway (`TGW_HOME=/tmp/tgw-dev TGW_PORT=41499`)
+and point it at Volgenic's development server with
+`tgw link add http://localhost:4100 vgl_…` in the same environment.
+
 ### `tgw events`
 
 ```
@@ -463,7 +515,11 @@ Sources/GatewayCore/        the domain, testable without an account:
     Monitor (updates → event log, cursors, folders, backfill)
     MessageSender (sendMessage, waiting for Telegram's verdict)
     WebhookDispatcher, MediaCache, RateLimiter, TelegramSession, Maintenance, GatewayClient
-Sources/GatewayServer/      the HTTP and WebSocket API on Hummingbird
+    LinkSettings (links in config.json, their tokens in the secret store)
+Sources/GatewayLink/        the links to Volgenic: GatewayLinkClient (one per link),
+                            LinkManager, the URLSession WebSocket transport, the frames
+Sources/GatewayServer/      the HTTP and WebSocket API on Hummingbird; InProcessAPI runs a
+                            link's requests through the same router
 Sources/GatewayDaemon/      the executable: wiring, lock, signals, housekeeping
 Sources/GatewayTestSupport/ FakeTDLib, TDLib fixtures, fake webhook client, fake Telegram session
 Sources/tgw/                the command-line tool

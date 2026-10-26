@@ -1,6 +1,7 @@
 import ArgumentParser
 import Foundation
 import GatewayCore
+import GatewayLink
 import GatewayServer
 import Logging
 import ServiceLifecycle
@@ -95,7 +96,9 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
         if try await host.apply(TelegramCredentials(config: config)) == .disabled {
             logger.warning("no api_id / api_hash in \(paths.config.path); Telegram is disabled until they are added and the gateway is reloaded (`tgw daemon reload`)")
         }
-        let reloader = ConfigReloader(paths: paths, running: config, host: host)
+        // Links to Volgenic (docs/link.md): URLs from config.json, tokens from the secret store.
+        let links = LinkManager(secrets: secrets, eventLog: eventLog, telegram: telegram, version: GatewayDaemonCommand.version, logger: Logger(label: "link"))
+        let reloader = ConfigReloader(paths: paths, running: config, host: host, links: links)
         let housekeeping = Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(3600))
@@ -116,10 +119,13 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
         let deps = Dependencies(
             store: store, eventLog: eventLog, grants: grants, accessRequests: accessRequests, monitor: monitor,
             translator: translator, mediaCache: mediaCache, sender: sender, dispatcher: dispatcher, telegram: telegram,
-            reloader: reloader, rateLimiter: rateLimiter, clock: clock, config: config, shutdown: shutdown, startedAt: startedAt,
+            reloader: reloader, links: links, rateLimiter: rateLimiter, clock: clock, config: config, shutdown: shutdown, startedAt: startedAt,
             version: GatewayDaemonCommand.version, logger: Logger(label: "server")
         )
         let app = GatewayServer.buildApplication(deps: deps, port: config.port, logger: Logger(label: "http"))
+        // Requests from Volgenic run through the same router, in process, as the admin.
+        await links.setHandler(InProcessAPI(deps: deps, adminToken: adminToken))
+        _ = await links.apply(config.links)
         let group = ServiceGroup(configuration: .init(services: [app], logger: logger))
 
         // SIGTERM / SIGINT: tell WebSocket clients we are going away (1001), then stop the
@@ -127,6 +133,7 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
         let signals = SignalWatcher(signals: [SIGTERM, SIGINT]) {
             logger.info("shutting down")
             Task {
+                await links.shutdown()
                 await shutdown.trigger()
                 try? await Task.sleep(for: .milliseconds(300))
                 await group.triggerGracefulShutdown()

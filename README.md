@@ -44,6 +44,10 @@ The gateway puts the login in one place:
   does (`tgw send`) or an app holds the `messages:send` permission for that chat. It never
   marks messages as read or sets the Telegram account online.
 
+- **Linkable to Volgenic.** `tgw link add` connects the gateway out to a Volgenic account,
+  which can then sign in, choose chats, read and send through it without reaching your Mac
+  from outside ([docs/link.md](docs/link.md)).
+
 Typical integrations include product-mention alerts, support triage, news summarization, and
 community analytics. The gateway delivers messages; consuming applications perform analysis.
 
@@ -143,6 +147,7 @@ consumer.
 | Look up an endpoint | [docs/api.md](docs/api.md) |
 | Look up the event format | [docs/events.md](docs/events.md) |
 | Understand what an app can and cannot see | [docs/grants.md](docs/grants.md) |
+| Link the gateway to Volgenic | [docs/link.md](docs/link.md) |
 | Understand how the gateway works | [docs/architecture.md](docs/architecture.md) |
 | Build, run and contribute | [docs/development.md](docs/development.md) |
 | See what works and what is planned | [docs/status.md](docs/status.md) |
@@ -153,13 +158,16 @@ consumer.
   messages and replies to their granted chats; no media, formatting, edits or deletions.
 - **Analyze anything.** No classification, sentiment or search. Apps do that.
 - **Serve other machines directly.** The API listens on `127.0.0.1` only. An app running
-  elsewhere can still receive events through webhooks.
+  elsewhere can still receive events through webhooks, and a Volgenic account the owner
+  linked reaches the gateway over a connection the gateway opens.
 - **Handle more than one Telegram account**, or run on anything but macOS.
 
 ## Security and privacy
 
 - The API listens only on `127.0.0.1`. Data and administrative endpoints require tokens;
   health checks and access-request submission and polling do not.
+- A link to Volgenic acts with the admin token's powers, except secrets: link only your own
+  Volgenic account. Its token is kept in the secret store.
 - Grant records store app-token hashes. Approved access requests retain the token for a
   `10:00` collection window. The admin token is stored in the configured secret store, and
   webhook signing secrets are stored in the gateway database.
@@ -185,6 +193,7 @@ Sources/
   CTDLib/           C module over TDLib's JSON interface
   TDLibClient/      Swift wrapper: requests, updates, sign-in states
   GatewayCore/      store, event log, grants, translation from TDLib to events, delivery
+  GatewayLink/      the outbound link to Volgenic
   GatewayServer/    the HTTP and WebSocket API
   GatewayDaemon/    the background service
   tgw/              command-line tool

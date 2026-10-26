@@ -41,6 +41,7 @@ It is the only process that loads **TDLib**, Telegram's official client library.
   which every event gets the next **sequence number**;
 - serves the HTTP and WebSocket API ([api.md](api.md)) on `127.0.0.1`, port 41414 by default;
 - delivers webhooks to apps that registered one;
+- keeps the links to Volgenic open, if the user made any (below);
 - downloads media on request and caches it.
 
 Apps never see TDLib's JSON. The event format belongs to the gateway, so upgrading TDLib
@@ -61,6 +62,24 @@ token: install the LaunchAgent, show health, change the monitored set, approve a
 tail the event stream. Every capability exists here before it exists in the app, which keeps
 the API complete and makes the gateway usable on a machine with no app installed.
 [development.md](development.md) has the command reference.
+
+### The link to Volgenic
+
+**Volgenic** is a web application whose Messages tab works on top of a gateway. Volgenic runs
+on the internet and the gateway listens only on `127.0.0.1`, so Volgenic cannot connect in.
+Instead the user runs `tgw link add <base_url> <token>` with the command Volgenic shows, and
+the gateway dials out: it opens one WebSocket to `<base_url>/messages/telegram/link` and
+keeps it open, reconnecting after every drop. Over it Volgenic sends HTTP requests in
+frames, which the gateway runs through its own router in the same process with the admin
+token, exactly as `tgw` would, and subscribes to the event log from its own cursor. The
+gateway also tells it when the sign-in state changes. [link.md](link.md) specifies the
+protocol.
+
+Each link is one actor in the `GatewayLink` module, independent of the others; the gateway
+may have one per Volgenic server. Links are listed in `config.json` with their tokens in the
+secret store, and a reload starts, restarts or closes them in place. A link can do whatever
+the admin token can except reach secrets, tokens or other links, and Volgenic stops it for
+good by revoking its token.
 
 ### The TDLib build
 
@@ -102,7 +121,8 @@ registered for this client application.
    `201` and the message, or with `502 send_failed`. With no verdict within `30s` it answers
    `504 send_timeout`; the message may still go out, and would then appear as `message.new`.
 
-`tgw send` takes the same path with the admin token.
+`tgw send` takes the same path with the admin token, and so does a send that Volgenic asks
+for over a link.
 
 ## Why exactly one process owns TDLib
 
@@ -126,8 +146,8 @@ Everything lives in one directory, `~/Library/Application Support/TelegramGatewa
 `TGW_HOME` points elsewhere:
 
 ```
-config.json      port, retention, media cache size, api_id / api_hash, secrets backend
-secrets.json     the admin token and TDLib's database key (mode 0600)
+config.json      port, retention, media cache size, api_id / api_hash, secrets backend, links
+secrets.json     the admin token, TDLib's database key and the link tokens (mode 0600)
 gateway.sqlite   the gateway's store: monitored set, chat and folder cache, event log,
                  per-chat cursors, access requests, grants, webhook deliveries, media index
 tdlib/           TDLib's own directory: td.binlog, db.sqlite (encrypted), files/
@@ -189,8 +209,9 @@ grant takes effect immediately on HTTP, WebSocket and webhooks.
 ## What the gateway does not do
 
 - **It sends messages only when asked.** The account is a real personal account, so sending
-  is the one action the gateway takes, and only on request: from the user with `tgw send`, or
-  from an app the user granted `messages:send`, always to a monitored chat. It sends plain
+  is the one action the gateway takes, and only on request: from the user with `tgw send` or
+  through the Volgenic account they linked, or from an app the user granted `messages:send`,
+  always to a monitored chat. It sends plain
   text and nothing else, and never on its own initiative.
 - **It does not mark anything as read and does not appear online.** It never calls the TDLib
   functions that count as viewing a chat, and it tells Telegram the account is offline. The
@@ -199,7 +220,8 @@ grant takes effect immediately on HTTP, WebSocket and webhooks.
 - **It does no analysis.** No classification, search or statistics: that is what apps are for.
 - **It serves one Telegram account** per data directory.
 - **It runs on macOS on Apple silicon only.**
-- **It does not accept connections from other machines.** Apps elsewhere use webhooks.
+- **It does not accept connections from other machines.** Apps elsewhere use webhooks. A
+  link to Volgenic is a connection the gateway makes itself, to a server the user named.
 - **It does not expose everything Telegram has.** Reactions, polls' contents, read state,
   forum topics and secret chats are outside the event format; [events.md](events.md) lists
   what is included.
@@ -207,8 +229,9 @@ grant takes effect immediately on HTTP, WebSocket and webhooks.
 ## Security model
 
 **Loopback only.** The API listens on `127.0.0.1` and never on another interface. There is
-no TLS because nothing leaves the machine except webhooks, which go to `https` URLs the user
-saw when approving the app (plain `http` is accepted only for loopback URLs). The API does
+no TLS on the API because nothing leaves the machine except webhooks, which go to `https`
+URLs the user saw when approving the app (plain `http` is accepted only for loopback URLs),
+and the links to Volgenic, which the gateway opens itself. The API does
 not provide Cross-Origin Resource Sharing (CORS) headers for browser clients. This is not
 an authentication boundary; tokens and grants control access to protected endpoints.
 
@@ -239,6 +262,15 @@ with a stable identity does not have that problem and can opt in with
 `"secrets": "keychain"` in `config.json`. Either way, the boundary is the user's macOS
 account: a process running as the user can read the admin token, and with it everything the
 gateway monitors.
+
+**Links act as the admin.** A link to Volgenic carries requests that run with the admin
+token, so whoever controls that Volgenic account can do what the admin token does: sign the
+gateway in and out, change the monitored set, approve apps, read everything monitored and
+send messages as the user. What it cannot do is reach secrets, the admin token or other
+links: those paths are refused before any route runs ([link.md](link.md)). The link token
+authenticates the gateway to Volgenic, and Volgenic keeps only its hash; the gateway keeps
+it in the secret store. The connection to an `https://` base URL is TLS, checked against the
+system's trust store.
 
 **Webhooks are signed.** Each delivery carries an HMAC-SHA256 of the exact body under the
 webhook's secret, so the receiving app can verify that it came from the gateway.

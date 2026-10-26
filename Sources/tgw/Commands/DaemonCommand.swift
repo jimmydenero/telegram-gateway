@@ -129,7 +129,7 @@ struct DaemonCommand: AsyncParsableCommand {
     struct Reload: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Make the running gateway re-read config.json (POST /v1/admin/reload).",
-            discussion: "Changes to api_id / api_hash take effect at once, however the gateway was started. Other settings (port, …) need `tgw daemon restart`."
+            discussion: "Changes to api_id / api_hash and to links (tgw link) take effect at once, however the gateway was started. Other settings (port, …) need `tgw daemon restart`."
         )
 
         @OptionGroup var output: OutputOptions
@@ -139,6 +139,9 @@ struct DaemonCommand: AsyncParsableCommand {
             let json = try Admin.check(try await client.post("/v1/admin/reload"))
             if output.json { print(json.pretty()); return }
             print("reloaded  telegram \(json["telegram"]?.stringValue ?? "?")")
+            for key in ["started", "restarted", "stopped"] {
+                for url in json["links"]?[key]?.arrayValue?.compactMap(\.stringValue) ?? [] { print("link      \(key) \(url)") }
+            }
             let restart = (json["restart_required"]?.arrayValue ?? []).compactMap(\.stringValue)
             if !restart.isEmpty {
                 print("restart   needed for: \(restart.joined(separator: ", ")) (`tgw daemon restart`)")
