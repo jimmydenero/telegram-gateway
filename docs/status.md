@@ -14,14 +14,14 @@ limitations below should inform deployment decisions.
   directory, refuses to run twice on the same data, shuts down cleanly.
 - **The whole API in [api.md](api.md)**: health, the access-request flow, grants and scopes,
   the monitored set and folders, paged events, the WebSocket stream with resume, history,
-  media with range requests, webhooks with signatures and retries, the login endpoints,
+  sending text messages with `messages:send`, media with range requests, webhooks with signatures and retries, the login endpoints,
   pruning, rate limits.
 - **The event log**: numbered events, resume from any sequence number, retention and pruning.
 - **Webhook delivery**: ordered batches, HMAC signatures, the retry schedule, pause and
   resume, recovery of an interrupted delivery after a restart.
 - **Administration** from the menu bar app and from `tgw`: install and inspect the
   LaunchAgent, reload the configuration in place, change the monitored set, approve, deny
-  and revoke, follow the event stream.
+  and revoke, follow the event stream, and send a message as yourself (`tgw send`).
 - **Tests**: the suite runs without a Telegram account and without network access, and
   covers everything above, including the translation of each TDLib update into the event
   format in [events.md](events.md).
@@ -43,6 +43,13 @@ built from that schema. The following behavior still requires live-account verif
 - Member counts and how often Telegram reports them.
 - Media: downloading on demand, progress while downloading, and eviction from the cache.
 - Long-running behaviour: days of uptime, reconnects, Telegram's rate limits on history.
+- Sending, which is new: that `sendMessage` followed by `updateMessageSendSucceeded` behaves
+  as the tests assume, that the confirmed message becomes exactly one `message.new`, how
+  Telegram's errors and flood waits look in practice, whether `30s` is the right time to
+  wait, and whether Telegram, seeing the account send, marks the chat as read or shows the
+  account as online on the user's other devices even though the gateway asks for neither.
+- The menu bar app's **Can send** section, added with sending, has not been built or run:
+  it was written without Xcode.
 
 `tgw watch` exists to check the second item directly: it prints each message as TDLib
 reports it, next to the message's own timestamp.
@@ -51,7 +58,8 @@ reports it, next to the message's own timestamp.
 
 - macOS on Apple silicon only, macOS 15 or later.
 - One Telegram account per gateway.
-- Read-only. The gateway cannot send messages.
+- Sending is plain text only: no media, formatting, editing or deleting, and no forum topic.
+  A sent message cannot be told apart from one the user typed on their phone.
 - No packaged release. You build from source, which needs Xcode, cmake and a few minutes.
 - You need your own `api_id` and `api_hash` from https://my.telegram.org.
 - Apps on other machines can receive webhooks but cannot open the WebSocket or call the
@@ -77,5 +85,4 @@ reports it, next to the message's own timestamp.
 - The gateway bundled inside the menu bar app, so that installing the app is the whole
   installation and no command-line step is needed.
 - A signed, notarized release, with secrets in the Keychain.
-- Sending messages, behind its own scope (`messages:send`) that the user grants explicitly.
 - Consumers on other machines holding a WebSocket, over a private network.
