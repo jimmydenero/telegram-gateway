@@ -579,8 +579,8 @@ struct AppModelTests {
         #expect(draft.chatIds.count == 3)
         #expect(model.approvalChatIds(draft).count == 3)
         #expect(model.otherMonitoredCount(draft) == 0)
-        // The reserved send permission is never pre-ticked.
-        #expect(draft.scopes == ["messages:read"])
+        // Sending is pre-ticked like every permission asked for; the owner can untick it.
+        #expect(draft.scopes == ["messages:read", "messages:send"])
     }
 
     @Test("Deny, resume delivery, revoke")
