@@ -96,6 +96,8 @@ public struct GatewayRequestContext: RequestContext, WebSocketRequestContext {
     public var principal: Principal?
     public var requestId: String
     public var rateLimit: (limit: Int, remaining: Int)?
+    /// True for a request that arrived over a link to Volgenic (`InProcessAPI`).
+    public internal(set) var viaLink = false
 
     public init(source: Source) {
         coreContext = .init(source: source)
@@ -109,6 +111,7 @@ public struct GatewayRequestContext: RequestContext, WebSocketRequestContext {
         coreContext = .init(source: LinkRequestSource(logger: linkLogger))
         webSocket = .init()
         requestId = Identifiers.requestTraceId()
+        viaLink = true
     }
 
     public var maxUploadSize: Int { 64 * 1024 }

@@ -202,6 +202,15 @@ struct LinkTests {
         }
     }
 
+    @Test func statusOverALinkLeavesOutTheLinks() async throws {
+        let gateway = try await Gateway()
+        let overLink = await gateway.api.perform(LinkHTTPRequest(method: "GET", path: "/v1/admin/status"), maxBodyBytes: 1 << 20)
+        #expect(overLink.status == 200)
+        let body = try JSONValue.parse(overLink.body)
+        #expect(body["head_seq"] != nil)
+        #expect(body["links"] == nil)
+    }
+
     @Test func policyAllowsTheEndpointsVolgenicUses() {
         for path in ["/v1/admin/auth", "/v1/admin/auth/qr", "/v1/admin/chats", "/v1/admin/folders", "/v1/admin/monitored-chats", "/v1/chats/-1001234567890/messages", "/v1/media/med_abc", "/v1/admin/status"] {
             #expect(LinkPolicy.check(method: "GET", path: path) == nil, "\(path)")
