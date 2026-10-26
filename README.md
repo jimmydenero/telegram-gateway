@@ -1,8 +1,9 @@
 # Telegram Gateway
 
-Telegram Gateway is a local, read-only API for building applications that consume Telegram
-messages. It runs on macOS, connects through a Telegram user account, and delivers events
-from selected chats over HTTP, WebSocket, or webhooks.
+Telegram Gateway is a local API for building applications that consume Telegram messages,
+and, when the account owner allows it, reply to them. It runs on macOS, connects through a
+Telegram user account, and delivers events from selected chats over HTTP, WebSocket, or
+webhooks.
 
 The account owner signs in once, chooses which chats to monitor, and approves each
 application's access. Applications receive scoped, revocable gateway tokens without handling
@@ -39,8 +40,9 @@ The gateway puts the login in one place:
 - **Resumable delivery.** Events are numbered and stored before delivery. Apps resume from
   their last processed sequence number while those events remain retained. Webhook consumers
   must handle duplicate deliveries.
-- **Read-only operation.** The gateway never sends messages, marks messages as read, or sets
-  the Telegram account online.
+- **Read-only unless you allow sending.** The gateway sends a message only when the owner
+  does (`tgw send`) or an app holds the `messages:send` permission for that chat. It never
+  marks messages as read or sets the Telegram account online.
 
 Typical integrations include product-mention alerts, support triage, news summarization, and
 community analytics. The gateway delivers messages; consuming applications perform analysis.
@@ -147,8 +149,8 @@ consumer.
 
 ## What it does not do
 
-- **Send messages.** The gateway is read-only. A permission for sending is reserved but not
-  implemented.
+- **Send anything but plain text.** Apps with the `messages:send` permission can send text
+  messages and replies to their granted chats; no media, formatting, edits or deletions.
 - **Analyze anything.** No classification, sentiment or search. Apps do that.
 - **Serve other machines directly.** The API listens on `127.0.0.1` only. An app running
   elsewhere can still receive events through webhooks.
