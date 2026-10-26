@@ -23,6 +23,9 @@ struct SecretsCommand: AsyncParsableCommand {
             print("location     \(store.description)")
             print("db key       \(try store.read(Secrets.databaseKeyAccount) != nil ? "present" : "absent (created on first TDLib open)")")
             print("admin token  \(try Secrets.existingAdminToken(store) != nil ? "present" : "absent (created when the daemon first runs)")")
+            for link in config.links {
+                print("link token   \(link.baseURL): \(try LinkSettings.token(for: link.baseURL, secrets: store) != nil ? "present" : "absent")")
+            }
         }
     }
 
