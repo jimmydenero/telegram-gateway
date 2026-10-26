@@ -14,11 +14,15 @@ struct Send: AsyncParsableCommand {
             """
     )
 
-    @Argument(help: "The chat id, as listed by `tgw monitor`.")
-    var chat: String
+    // Collected as unrecognized words so that a group's or channel's negative chat id
+    // (-100…) is read as the chat, not as an option.
+    @Argument(parsing: .allUnrecognized, help: ArgumentHelp(
+        "The chat id, as listed by `tgw monitor`, then the text to send (plain text, up to 4096 characters; quote it).",
+        valueName: "chat> <text"))
+    var chatAndText: [String] = []
 
-    @Argument(help: "The text to send (plain text, up to 4096 characters).")
-    var text: String
+    var chat: String { chatAndText.first ?? "" }
+    var text: String { chatAndText.dropFirst().first ?? "" }
 
     @Option(name: .customLong("reply-to"), help: "The id of a message in the same chat to reply to.")
     var replyTo: String?
@@ -29,6 +33,7 @@ struct Send: AsyncParsableCommand {
     @OptionGroup var output: OutputOptions
 
     func validate() throws {
+        guard chatAndText.count == 2 else { throw ValidationError("give the chat id and the text, with the text in quotes") }
         guard Int64(chat) != nil else { throw ValidationError("the chat must be a chat id, for example -1001234567890") }
         if let replyTo, (Int64(replyTo) ?? 0) <= 0 { throw ValidationError("--reply-to must be a message id") }
         do {
