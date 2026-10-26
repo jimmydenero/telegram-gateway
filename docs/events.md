@@ -147,6 +147,12 @@ A channel post with a photo and a caption:
 }
 ```
 
+**Messages the user sends** arrive as `message.new` with `is_outgoing: true`, once, after
+Telegram has confirmed them and given them their final id. This is the same whether the user
+typed the message on their phone, sent it with `tgw send`, or an app sent it through
+`POST /v1/chats/{chat_id}/messages` ([api.md](api.md#sending-messages)); the event does not
+say which. A message that is still being sent, or that fails to send, produces no event.
+
 ### `message.edited`
 
 The payload is the same as for `message.new`, with `edit_date` set; `occurred_at` equals it.

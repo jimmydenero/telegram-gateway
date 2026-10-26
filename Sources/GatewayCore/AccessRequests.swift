@@ -42,7 +42,6 @@ public actor AccessRequests {
         let description = submission.description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard (1...280).contains(description.count) else { throw APIError.invalidRequest("description", "must be 1–280 characters") }
         guard !submission.scopes.isEmpty else { throw APIError.invalidRequest("scopes", "must be a non-empty array of scope names") }
-        if submission.scopes.contains(.messagesSend) { throw APIError.scopeNotAvailable(Scope.messagesSend.rawValue) }
         if let url = submission.webhookUrl { try AccessRequests.validateWebhookUrl(url) }
         let now = clock.now
         let request = AccessRequest(

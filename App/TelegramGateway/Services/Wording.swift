@@ -37,7 +37,7 @@ enum Permission {
         case "history:read": "Messages from before the app was connected"
         case "media:read": "Download what is attached to those messages"
         case "chats:read": "Titles, usernames and member counts"
-        case "messages:send": "Not available in this version"
+        case "messages:send": "Sends messages as you in these chats; people see them as written by you"
         default: "Not known to this version of the app"
         }
     }
@@ -48,6 +48,15 @@ enum Permission {
         case "chats:read": "chat names"
         default: name(scope).lowercasedFirst
         }
+    }
+
+    /// The one permission that acts as the user instead of reading. Shown apart, under
+    /// "Can send", so it is never mistaken for one more kind of reading.
+    static let send = "messages:send"
+
+    /// The reading permissions among `scopes`, in display order.
+    static func reading(_ scopes: [String]) -> [String] {
+        sorted(scopes.filter { $0 != send })
     }
 
     static func sorted(_ scopes: [String]) -> [String] {

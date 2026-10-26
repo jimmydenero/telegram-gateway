@@ -209,6 +209,9 @@ where you decide exactly what it gets:
   you add later.
 - **Can read.** One checkbox per permission it asked for. You can remove permissions; you
   cannot add ones it did not ask for.
+- **Can send.** Only when the app asked to send messages: one checkbox, "Send messages",
+  which says that the app sends messages as you in these chats and that people see them as
+  written by you. Untick it to let the app read without sending.
 
 The bar at the bottom summarises the decision ("3 chats · 3 permissions"). **Approve** gives
 the app its access; **Cancel** leaves the request pending.
@@ -222,11 +225,12 @@ the app its access; **Cancel** leaves the request pending.
 | Past messages | `history:read` | Read messages from before it was connected, as far back as your account can see. |
 | Photos and files | `media:read` | Download what is attached to those messages. Without it, the app sees that a message has a photo, not the photo. |
 | Chat names and details | `chats:read` | See the titles, usernames and member counts of its chats. |
-| Send messages | `messages:send` | Nothing yet. Sending is not available in this version, and a request for it is refused. |
+| Send messages | `messages:send` | Send messages **as you** in its chats. People in those chats see the messages as written by you. Shown under its own heading, **Can send**, when approving and in the app's detail. |
 
 An app only ever sees chats that are both granted to it and currently monitored.
 
-**An app's detail.** Select an app under **Has access** to see what it can read, which chats
+**An app's detail.** Select an app under **Has access** to see what it can read, whether it
+can send messages as you (under **Can send**), which chats
 it has (a chat you no longer monitor says so in amber), and how it receives messages:
 **Sends to** with the host and the last delivery for a webhook, or "Directly to the gateway"
 with when it was last connected.

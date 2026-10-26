@@ -368,6 +368,26 @@ $ tgw grants list --all           # include revoked grants
 
 Revoking is immediate and permanent; the app has to request access again.
 
+### `tgw send`
+
+Sends a text message as you, through the running gateway, to a monitored chat. It shows the
+chat, the account and the text, and asks before sending; `--yes` skips the question.
+
+```
+$ tgw send -1001987654321 "Thanks, this is fixed in 2.4.1." --reply-to 1522
+To      Acme Support (-1001987654321)
+Reply   to message 1522
+From    Ada Lovelace, your Telegram account
+Text    Thanks, this is fixed in 2.4.1.
+Send this message? [y/N] y
+sent: message 1530 in chat -1001987654321
+```
+
+It calls `POST /v1/chats/{chat_id}/messages` with the admin token
+([api.md](api.md#sending-messages)), so it needs a running, signed-in gateway and sends only
+to monitored chats. The message reaches everyone in the chat. Never point it at a real chat
+while developing or testing: tests use the fake TDLib and send nothing.
+
 ### `tgw events`
 
 ```
@@ -441,6 +461,7 @@ Sources/GatewayCore/        the domain, testable without an account:
     Store (SQLite through GRDB), EventLog, Grants, AccessRequests
     TDLibRequesting, Translator (TDLib JSON → the event format)
     Monitor (updates → event log, cursors, folders, backfill)
+    MessageSender (sendMessage, waiting for Telegram's verdict)
     WebhookDispatcher, MediaCache, RateLimiter, TelegramSession, Maintenance, GatewayClient
 Sources/GatewayServer/      the HTTP and WebSocket API on Hummingbird
 Sources/GatewayDaemon/      the executable: wiring, lock, signals, housekeeping

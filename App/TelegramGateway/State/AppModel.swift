@@ -914,7 +914,7 @@ final class AppModel {
         approval = ApprovalDraft(
             request: request,
             chatIds: Set(requested.isEmpty ? monitoredIds : requested),
-            scopes: Set(request.scopes).subtracting(["messages:send"]))
+            scopes: Set(request.scopes))
         accessError = nil
     }
 

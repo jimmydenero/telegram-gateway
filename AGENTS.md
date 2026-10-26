@@ -19,9 +19,13 @@ walkthrough for someone setting it up. To build, test and run:
 - **Apps never see TDLib's JSON.** Everything that crosses the API is in the format defined
   in `docs/events.md` and `docs/api.md`. If you change the format, change the document in
   the same commit.
-- **Never send a message, mark anything as read, or make the account appear online**, from
-  any code path, including tests and debugging tools. The gateway runs on a real personal
-  Telegram account. That means no `sendMessage`, `viewMessages` or `openChat`, and the
+- **Send only through `MessageSender`, and only when a person asked.** The gateway runs on a
+  real personal Telegram account. A message is sent only for an app holding an approved
+  `messages:send` grant for that chat, or for the owner's own `tgw send`; both go through
+  `MessageSender`, the one caller of `sendMessage`. Never send from tests, fakes, scripts or
+  debugging tools against a real account: tests use `FakeTDLib`, which sends nothing.
+- **Never mark anything as read or make the account appear online**, from any code path,
+  including tests and debugging tools. That means no `viewMessages` or `openChat`, and the
   `online` option stays false.
 - **Never commit secrets or build artifacts**: no `api_id` or `api_hash`, no tokens, nothing
   from `~/Library/Application Support/TelegramGateway/`, and not the built TDLib library.

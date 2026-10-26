@@ -11,13 +11,13 @@ struct TGW: AsyncParsableCommand {
         abstract: "Telegram Gateway command-line tool.",
         discussion: """
             Administers the gateway daemon over its local API (daemon, health, monitor, \
-            requests, grants, events) and, for development before the daemon is installed, \
+            requests, grants, events, send) and, for development before the daemon is installed, \
             opens TDLib directly (login, whoami, chats, watch, logout). Data lives in \
             ~/Library/Application Support/TelegramGateway/ (TGW_HOME overrides). The direct \
             commands refuse to run while the daemon holds TDLib.
             """,
         subcommands: [
-            DaemonCommand.self, Health.self, MonitorCommand.self, RequestsCommand.self, GrantsCommand.self, EventsCommand.self, SecretsCommand.self,
+            DaemonCommand.self, Health.self, MonitorCommand.self, RequestsCommand.self, GrantsCommand.self, EventsCommand.self, Send.self, SecretsCommand.self,
             Login.self, Whoami.self, Chats.self, Watch.self, Logout.self,
         ]
     )

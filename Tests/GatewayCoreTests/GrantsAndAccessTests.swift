@@ -144,7 +144,9 @@ import Testing
         #expect(await apiError { try await ar.create(AccessRequests.Submission(name: "", description: "d", scopes: [.chatsRead], requestedChats: nil, webhookUrl: nil)) }?.details["field"] == "name")
         #expect(await apiError { try await ar.create(AccessRequests.Submission(name: "n", description: String(repeating: "x", count: 281), scopes: [.chatsRead], requestedChats: nil, webhookUrl: nil)) }?.details["field"] == "description")
         #expect(await apiError { try await ar.create(submission(scopes: [])) }?.details["field"] == "scopes")
-        #expect(await apiError { try await ar.create(submission(scopes: [.messagesSend])) }?.code == "scope_not_available")
+        // messages:send is grantable: the request is accepted like any other.
+        let send = try await ar.create(submission(scopes: [.messagesRead, .messagesSend]))
+        #expect(send.scopes == [.messagesRead, .messagesSend])
         #expect(await apiError { try await ar.create(submission(webhook: "http://example.com/h")) }?.details["field"] == "webhook.url")
         #expect(await apiError { try await ar.create(submission(webhook: "ftp://example.com/h")) }?.code == "invalid_request")
         _ = try await ar.create(submission(webhook: "http://localhost:9000/h"))
