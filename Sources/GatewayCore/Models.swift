@@ -426,7 +426,7 @@ public enum Scope: String, Codable, Sendable, CaseIterable, Comparable {
     case historyRead = "history:read"
     case mediaRead = "media:read"
     case chatsRead = "chats:read"
-    /// Reserved, not implemented in v1: requesting it is `400 scope_not_available`.
+    /// Sending text messages as the user to the granted chats (`MessageSender`).
     case messagesSend = "messages:send"
 
     public static func < (lhs: Scope, rhs: Scope) -> Bool { lhs.rawValue < rhs.rawValue }

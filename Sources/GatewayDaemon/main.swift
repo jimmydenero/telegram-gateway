@@ -79,11 +79,19 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
         let mediaCache = MediaCache(store: store, tdlib: tdlib, maxBytes: config.mediaCacheMaxBytes, clock: clock, logger: Logger(label: "media"))
         let dispatcher = WebhookDispatcher(store: store, eventLog: eventLog, grants: grants, http: URLSessionWebhookClient(), clock: clock, logger: Logger(label: "webhooks"))
         let rateLimiter = RateLimiter(clock: clock)
+        let sender = MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock)
         let shutdown = ShutdownSignal()
 
         try await monitor.load()
         await dispatcher.start()
-        let monitorTask = Task { await monitor.run(updates: host.updates) }
+        // The monitor records each update first, so a message this gateway sent is in the log
+        // as message.new by the time the sender learns it went through.
+        let monitorTask = Task {
+            for await update in host.updates {
+                await monitor.handle(update: update)
+                await sender.observe(update)
+            }
+        }
         if try await host.apply(TelegramCredentials(config: config)) == .disabled {
             logger.warning("no api_id / api_hash in \(paths.config.path); Telegram is disabled until they are added and the gateway is reloaded (`tgw daemon reload`)")
         }
@@ -107,7 +115,7 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
 
         let deps = Dependencies(
             store: store, eventLog: eventLog, grants: grants, accessRequests: accessRequests, monitor: monitor,
-            translator: translator, mediaCache: mediaCache, dispatcher: dispatcher, telegram: telegram,
+            translator: translator, mediaCache: mediaCache, sender: sender, dispatcher: dispatcher, telegram: telegram,
             reloader: reloader, rateLimiter: rateLimiter, clock: clock, config: config, shutdown: shutdown, startedAt: startedAt,
             version: GatewayDaemonCommand.version, logger: Logger(label: "server")
         )

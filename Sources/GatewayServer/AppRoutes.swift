@@ -68,7 +68,7 @@ struct PublicRoutes {
 }
 
 /// Routes for app tokens (the admin token works too): own grant, webhook settings, chats,
-/// events, history, media.
+/// events, history, sending, media.
 struct AppRoutes {
     let deps: Dependencies
 
@@ -81,6 +81,7 @@ struct AppRoutes {
         group.get("/chats") { _, context in try await chats(context) }
         group.get("/chats/:chat_id") { _, context in try await chat(context) }
         group.get("/chats/:chat_id/messages") { request, context in try await history(request, context) }
+        group.post("/chats/:chat_id/messages") { request, context in try await sendMessage(request, context) }
         group.get("/events") { request, context in try await events(request, context) }
         group.get("/media/:media_id") { request, context in try await media(request, context, head: false) }
         group.head("/media/:media_id") { request, context in try await media(request, context, head: true) }
@@ -182,6 +183,23 @@ struct AppRoutes {
             "has_more": .bool(page.count >= limit),
             "next_before": .id(page.last?.message.id ?? before),
         ])
+    }
+
+    // MARK: Sending
+
+    func sendMessage(_ request: Request, _ context: GatewayRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        try await deps.grants.require(.messagesSend, principal)
+        let chatId = try parseChatId(try context.parameters.require("chat_id"), field: "chat_id")
+        let body = try await jsonBody(request, context)
+        let text = try body.requiredString("text")
+        var replyTo: Int64?
+        if let raw = try body.optionalString("reply_to") {
+            guard let id = Int64(raw), id > 0 else { throw APIError.invalidRequest("reply_to", "must be a message id string") }
+            replyTo = id
+        }
+        let message = try await deps.sender.send(text, to: chatId, replyTo: replyTo, as: principal)
+        return json(["message": message.json], status: .created)
     }
 
     // MARK: Events

@@ -36,10 +36,6 @@ public struct APIError: Error, Sendable, Equatable, CustomStringConvertible {
         APIError(status: 400, code: "invalid_request", message: "\(field): \(reason)", details: ["field": .string(field), "reason": .string(reason)])
     }
 
-    public static func scopeNotAvailable(_ scope: String) -> APIError {
-        APIError(status: 400, code: "scope_not_available", message: "The \(scope) scope is reserved and not implemented.", details: ["scope": .string(scope)])
-    }
-
     public static func scopeNotRequested(_ scope: String) -> APIError {
         APIError(status: 400, code: "scope_not_requested", message: "The app did not ask for the \(scope) scope.", details: ["scope": .string(scope)])
     }
@@ -76,7 +72,7 @@ public struct APIError: Error, Sendable, Equatable, CustomStringConvertible {
 
     public static let chatNotGranted = APIError(status: 403, code: "chat_not_granted", message: "The chat is outside this grant, not monitored, or does not exist.")
 
-    // MARK: 404 / 409 / 410 / 413 / 429 / 500 / 503
+    // MARK: 404 / 409 / 410 / 413 / 429 / 500 / 502 / 503 / 504
 
     public static let notFound = APIError(status: 404, code: "not_found", message: "No such route or object.")
 
@@ -115,8 +111,23 @@ public struct APIError: Error, Sendable, Equatable, CustomStringConvertible {
         APIError(status: 500, code: "internal", message: message)
     }
 
+    public static func sendFailed(reason: String, telegramCode: Int) -> APIError {
+        APIError(
+            status: 502, code: "send_failed", message: "Telegram did not send the message: \(reason.isEmpty ? "no reason given" : reason)",
+            details: ["reason": .string(reason), "telegram_code": .number(Double(telegramCode))]
+        )
+    }
+
     public static func notLoggedIn(authState: String) -> APIError {
         APIError(status: 503, code: "not_logged_in", message: "The gateway has no Telegram session; log in to Telegram first.", details: ["auth_state": .string(authState)])
+    }
+
+    public static func sendTimeout(chatId: Int64, after timeout: Duration) -> APIError {
+        APIError(
+            status: 504, code: "send_timeout",
+            message: "Telegram did not confirm the message within \(timeout.components.seconds)s. It may still be sent; if it is, it appears as message.new.",
+            details: ["chat_id": .id(chatId)]
+        )
     }
 
     public static func telegramUnavailable(connectionState: String) -> APIError {
