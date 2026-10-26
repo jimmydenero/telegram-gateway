@@ -178,34 +178,44 @@ public struct ReloadResult: Sendable, Equatable {
     public var telegram: TelegramReloadOutcome
     /// Settings that changed in `config.json` but only take effect when the gateway restarts.
     public var restartRequired: [String]
+    /// What happened to the links to Volgenic; nil where the gateway runs no links.
+    public var links: LinkReloadSummary?
 
-    public init(telegram: TelegramReloadOutcome, restartRequired: [String]) {
+    public init(telegram: TelegramReloadOutcome, restartRequired: [String], links: LinkReloadSummary? = nil) {
         self.telegram = telegram
         self.restartRequired = restartRequired
+        self.links = links
     }
 
     public var json: JSONValue {
-        [
+        var object: JSONObjectValue = [
             "reloaded": true,
             "telegram": .string(telegram.rawValue),
             "restart_required": .array(restartRequired.map { .string($0) }),
         ]
+        if let links { object["links"] = links.json }
+        return .object(object)
     }
 }
 
 /// Re-reads `config.json` and applies what can change while the gateway runs: the Telegram
-/// credentials. Everything else that differs from the running configuration is reported as
+/// credentials and the links to Volgenic (with their tokens from the secret store). Everything else that differs from the running configuration is reported as
 /// needing a restart.
 public actor ConfigReloader {
     private let paths: Paths
     private let running: Config
     private let host: TelegramHost
+    private let links: (any LinkReloading)?
     private let environment: [String: String]
 
-    public init(paths: Paths, running: Config, host: TelegramHost, environment: [String: String] = ProcessInfo.processInfo.environment) {
+    public init(
+        paths: Paths, running: Config, host: TelegramHost, links: (any LinkReloading)? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.paths = paths
         self.running = running
         self.host = host
+        self.links = links
         self.environment = environment
     }
 
@@ -222,6 +232,7 @@ public actor ConfigReloader {
         if fresh.eventsRetentionDays != running.eventsRetentionDays { restart.append("events_retention_days") }
         if fresh.mediaCacheMaxBytes != running.mediaCacheMaxBytes { restart.append("media_cache_max_bytes") }
         let outcome = try await host.apply(TelegramCredentials(config: fresh))
-        return ReloadResult(telegram: outcome, restartRequired: restart)
+        let linkSummary = await links?.apply(fresh.links)
+        return ReloadResult(telegram: outcome, restartRequired: restart, links: linkSummary)
     }
 }

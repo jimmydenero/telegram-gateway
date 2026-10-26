@@ -15,6 +15,9 @@ public struct Config: Sendable, Equatable {
     public var apiHash: String?
     /// Where secrets live: the file store (default) or the login Keychain (shipped app only).
     public var secrets: SecretsBackend
+    /// Outbound links to Volgenic servers (docs/link.md), one per base URL. Their tokens are
+    /// in the secret store, never here.
+    public var links: [LinkConfig]
 
     public init(
         port: Int = Config.defaultPort,
@@ -22,7 +25,8 @@ public struct Config: Sendable, Equatable {
         mediaCacheMaxBytes: Int64 = Config.defaultMediaCacheMaxBytes,
         apiId: Int32? = nil,
         apiHash: String? = nil,
-        secrets: SecretsBackend = .file
+        secrets: SecretsBackend = .file,
+        links: [LinkConfig] = []
     ) {
         self.port = port
         self.eventsRetentionDays = eventsRetentionDays
@@ -30,6 +34,7 @@ public struct Config: Sendable, Equatable {
         self.apiId = apiId
         self.apiHash = apiHash
         self.secrets = secrets
+        self.links = links
     }
 
     /// True when both `api_id` and `api_hash` are present.
@@ -68,6 +73,9 @@ public struct Config: Sendable, Equatable {
                     throw GatewayError.invalidConfig("secrets must be \"file\" or \"keychain\"")
                 }
                 config.secrets = backend
+            }
+            if let raw = fields["links"], raw != .null {
+                config.links = try LinkConfig.parse(raw)
             }
             // Other keys (the menu bar app's daemon_path, for one) are left alone.
         }

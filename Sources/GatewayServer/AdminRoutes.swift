@@ -1,5 +1,6 @@
 import Foundation
 import GatewayCore
+import GatewayLink
 import HTTPTypes
 import Hummingbird
 import TDLibClient
@@ -12,6 +13,7 @@ struct AdminRoutes {
     func register(on group: RouterGroup<GatewayRequestContext>) {
         group.get("/status") { _, _ in try await status() }
         group.post("/reload") { _, _ in try await reload() }
+        group.get("/links") { _, _ in json(["links": await linksJSON()]) }
         group.get("/auth") { _, _ in try await auth() }
         group.post("/auth/qr") { _, _ in try await authStep { try await deps.telegram.requestQr() } }
         group.post("/auth/phone") { request, context in
@@ -82,7 +84,13 @@ struct AdminRoutes {
             "oldest_seq": .optional(try await deps.eventLog.oldestSeq()),
             "media_cache_bytes": .number(Double(try await deps.mediaCache.cachedBytes())),
             "backfill": ["in_progress": .bool(backfill.inProgress), "chats_pending": .number(Double(backfill.chatsPending))],
+            "links": await linksJSON(),
         ])
+    }
+
+    /// Every link to Volgenic and its state (docs/link.md "Link state").
+    func linksJSON() async -> JSONValue {
+        .array(await deps.links?.statuses().map(\.json) ?? [])
     }
 
     /// Re-reads config.json and brings the Telegram session in line with it, without

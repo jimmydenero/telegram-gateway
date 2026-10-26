@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "TDLibClient", targets: ["TDLibClient"]),
         .library(name: "QRCode", targets: ["QRCode"]),
         .library(name: "GatewayCore", targets: ["GatewayCore"]),
+        .library(name: "GatewayLink", targets: ["GatewayLink"]),
         .library(name: "GatewayServer", targets: ["GatewayServer"]),
         .executable(name: "tgw", targets: ["tgw"]),
         .executable(name: "GatewayDaemon", targets: ["GatewayDaemon"]),
@@ -57,11 +58,21 @@ let package = Package(
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        // The outbound link to Volgenic (docs/link.md): one WebSocket client per base URL.
+        .target(
+            name: "GatewayLink",
+            dependencies: [
+                "GatewayCore",
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         // The HTTP + WebSocket API (docs/api.md) as a library so tests can drive it in-process.
         .target(
             name: "GatewayServer",
             dependencies: [
                 "GatewayCore",
+                "GatewayLink",
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
             ],
@@ -73,6 +84,7 @@ let package = Package(
             dependencies: [
                 "GatewayServer",
                 "GatewayCore",
+                "GatewayLink",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
                 .product(name: "Logging", package: "swift-log"),
@@ -119,6 +131,20 @@ let package = Package(
                 "GatewayTestSupport",
                 .product(name: "HummingbirdTesting", package: "hummingbird"),
                 .product(name: "HummingbirdWSTesting", package: "hummingbird-websocket"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "GatewayLinkTests",
+            dependencies: [
+                "GatewayLink",
+                "GatewayServer",
+                "GatewayCore",
+                "GatewayTestSupport",
+                .product(name: "Hummingbird", package: "hummingbird"),
+                .product(name: "HummingbirdWebSocket", package: "hummingbird-websocket"),
+                .product(name: "ServiceLifecycle", package: "swift-service-lifecycle"),
+                .product(name: "Logging", package: "swift-log"),
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
