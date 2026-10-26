@@ -209,8 +209,8 @@ extension TestClientProtocol {
             let deniedPoll = try await client.call(.get, "/v1/access-requests/\(deniedId)")
             #expect(deniedPoll.json["status"] == "denied" && deniedPoll.json["reason"] == "Not now.")
 
-            let reserved = try await client.call(.post, "/v1/access-requests", body: ["name": "X", "description": "Y", "scopes": ["messages:send"]])
-            #expect(reserved.status == 400 && reserved.code == "scope_not_available")
+            let send = try await client.call(.post, "/v1/access-requests", body: ["name": "X", "description": "Y", "scopes": ["messages:send"]])
+            #expect(send.status == 201 && send.json["status"] == "pending")
             let invalid = try await client.call(.post, "/v1/access-requests", body: ["name": "X", "description": "Y", "scopes": ["nope"]])
             #expect(invalid.status == 400 && invalid.code == "invalid_request" && invalid.json["error"]?["details"]?["field"] == "scopes")
         }

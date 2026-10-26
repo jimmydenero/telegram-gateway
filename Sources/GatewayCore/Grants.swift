@@ -138,7 +138,7 @@ public actor Grants {
         return [
             "id": "grant_admin",
             "app": ["name": "Admin", "description": "The admin token: every scope over every monitored chat."],
-            "scopes": .array(Scope.allCases.filter { $0 != .messagesSend }.map { .string($0.rawValue) }),
+            "scopes": .array(Scope.allCases.map { .string($0.rawValue) }),
             "chats": ["mode": "list", "chat_ids": .array(monitored.map { .id($0) })],
             "effective_chat_ids": .array(monitored.map { .id($0) }),
             "webhook": .null,

@@ -5,7 +5,9 @@ import TDLibClient
 /// A scripted TDLib. Answers `getUser`, `getChat`, `getSupergroup`, `getBasicGroup`,
 /// `getMessage`, `getChatHistory`, `getRemoteFile`, `getFile`, `downloadFile`, `deleteFile`,
 /// `loadChats`, `getChats` from the objects a test registers, records every request, and
-/// lets a test override any type with a handler.
+/// lets a test override any type with a handler. `sendMessage` answers as TDLib does, with a
+/// pending message under a fresh local id (`Fixtures.localMessageId`); nothing is sent
+/// anywhere, and the test decides the outcome by pushing an update.
 public actor FakeTDLib: TDLibRequesting {
     public typealias Handler = @Sendable (JSONObject) throws -> JSONObject
 
@@ -21,6 +23,7 @@ public actor FakeTDLib: TDLibRequesting {
     private var handlers: [String: Handler] = [:]
     /// Files that "finish" downloading when `downloadFile` is called, and where they land.
     private var downloadable: [String: String] = [:]
+    private var sendCount = 0
 
     public init() {}
 
@@ -131,6 +134,12 @@ public actor FakeTDLib: TDLibRequesting {
             }
             // A stalled download: the file stays incomplete.
             return file
+        case "sendMessage":
+            sendCount += 1
+            let chatId = r.int64("chat_id") ?? 0
+            let text = r.object("input_message_content")?.object("text")?.string("text") ?? ""
+            let replyTo = r.object("reply_to")?.int64("message_id").map(MessageId.toPublic)
+            return Fixtures.pendingMessage(chatId: chatId, localId: Fixtures.localMessageId(sendCount), text: text, replyTo: replyTo)
         case "deleteFile":
             return JSONBox(["@type": "ok"])
         case "setOption", "close":

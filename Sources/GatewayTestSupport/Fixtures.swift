@@ -16,6 +16,8 @@ public enum Fixtures {
     public static let privateChatId: Int64 = 123456789
     public static let basicGroupChatId: Int64 = -987654321
     public static let basicGroupId: Int64 = 987654321
+    /// The account the gateway is signed in to: the sender of messages it sends.
+    public static let ownerId: Int64 = 424242424
 
     // MARK: Users and chats
 
@@ -76,6 +78,7 @@ public enum Fixtures {
     public static func populate(_ tdlib: FakeTDLib) async {
         await tdlib.add(user: user(id: adaId, first: "Ada", last: "Lovelace", username: "ada"))
         await tdlib.add(user: user(id: botId, first: "Acme Bot", username: "acmebot", bot: true))
+        await tdlib.add(user: user(id: ownerId, first: "Grace", last: "Hopper", username: "grace"))
         await tdlib.add(supergroup: supergroup(id: channelSupergroupId, username: "acmeupdates", memberCount: 12840, isChannel: true))
         await tdlib.add(chat: supergroupChat(id: channelId, supergroupId: channelSupergroupId, title: "Acme Product Updates", isChannel: true, photoUniqueId: "AQADchatphoto", lastMessageId: MessageId.toInternal(411)))
         await tdlib.add(supergroup: supergroup(id: groupSupergroupId, username: "acmecommunity", memberCount: 4200, isChannel: false))
@@ -198,6 +201,33 @@ public enum Fixtures {
 
     public static func forwardFromUser(userId: Int64, date: Int) -> JSONObject {
         ["@type": "messageForwardInfo", "origin": ["@type": "messageOriginUser", "sender_user_id": userId], "date": date]
+    }
+
+    // MARK: Sending
+
+    /// The temporary id TDLib gives the `n`-th message this client sends, before the server
+    /// assigns the final one. Not a valid public id.
+    public static func localMessageId(_ n: Int) -> Int64 {
+        MessageId.toInternal(2_000_000 + Int64(n)) + 1
+    }
+
+    /// The message `sendMessage` returns at once: a local id and a pending `sending_state`.
+    public static func pendingMessage(chatId: Int64, localId: Int64, text: String, replyTo: Int64? = nil) -> JSONBox {
+        var object = message(
+            chatId: chatId, id: 0, sender: userSender(ownerId), isOutgoing: true, content: textContent(text),
+            replyTo: replyTo.map { (chatId, $0) }, sendingState: ["@type": "messageSendingStatePending", "sending_id": 0]
+        ).object
+        object["id"] = localId
+        return JSONBox(object)
+    }
+
+    /// The same message as the server stored it, with its final public `id`.
+    public static func sentMessage(chatId: Int64, id: Int64, text: String, replyTo: Int64? = nil, date: Int = 1_790_000_000) -> JSONBox {
+        message(chatId: chatId, id: id, sender: userSender(ownerId), date: date, isOutgoing: true, content: textContent(text), replyTo: replyTo.map { (chatId, $0) })
+    }
+
+    public static func updateMessageSendFailed(_ message: JSONBox, oldMessageId: Int64, code: Int, error: String) -> JSONBox {
+        JSONBox(["@type": "updateMessageSendFailed", "message": message.object, "old_message_id": oldMessageId, "error": ["@type": "error", "code": code, "message": error]])
     }
 
     // MARK: Updates
