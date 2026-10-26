@@ -22,6 +22,12 @@ limitations below should inform deployment decisions.
 - **Administration** from the menu bar app and from `tgw`: install and inspect the
   LaunchAgent, reload the configuration in place, change the monitored set, approve, deny
   and revoke, follow the event stream, and send a message as yourself (`tgw send`).
+- **Links to Volgenic** ([link.md](link.md)), new: `tgw link add/list/remove`, the outbound
+  WebSocket with `hello`, requests run through the admin API in process, `subscribe` with
+  backlog, live events and `gap`, `auth_state` pushes, reconnecting with backoff, and the stop
+  when Volgenic refuses the token. Tested against a stand-in for Volgenic in the test process
+  and run once by hand, with a real gateway (no Telegram credentials) against a stand-in
+  server on `127.0.0.1`.
 - **Tests**: the suite runs without a Telegram account and without network access, and
   covers everything above, including the translation of each TDLib update into the event
   format in [events.md](events.md).
@@ -48,6 +54,10 @@ built from that schema. The following behavior still requires live-account verif
   Telegram's errors and flood waits look in practice, whether `30s` is the right time to
   wait, and whether Telegram, seeing the account send, marks the chat as read or shows the
   account as online on the user's other devices even though the gateway asks for neither.
+- **The link to Volgenic**, which is new. It has not been run against a real Volgenic server
+  or with a signed-in account: not the TLS connection to `wss://volgenic.com`, Volgenic's
+  `401` and `4401`, its pings, a sign-in driven from Volgenic, media of several megabytes in
+  one frame, or a link held open for days through sleep and network changes.
 - The menu bar app's **Can send** section, added with sending, has not been built or run:
   it was written without Xcode.
 
@@ -76,6 +86,9 @@ reports it, next to the message's own timestamp.
 - A locally built menu bar app may fail to register the gateway to start at login; macOS
   reports it registered but does not start it. Installing the LaunchAgent with
   `tgw daemon install` works, as does letting the app run the gateway while it is open.
+- A link to Volgenic has the admin token's powers except secrets, including sending messages
+  as the user; there is no narrower link. The menu bar app does not show links yet: use
+  `tgw link`.
 - There are two ways to run the gateway at login (the app's and `tgw daemon install`). Use
   one; a second gateway on the same data directory refuses to start.
 

@@ -1,5 +1,6 @@
 import Foundation
 import GatewayCore
+import GatewayLink
 import HTTPTypes
 import Hummingbird
 import HummingbirdCore
@@ -23,6 +24,8 @@ public struct Dependencies: Sendable {
     public var telegram: any TelegramControl
     /// Re-reads config.json (`POST /v1/admin/reload`); nil where reloading is not available.
     public var reloader: ConfigReloader?
+    /// The links to Volgenic (docs/link.md); nil where the gateway runs none.
+    public var links: LinkManager?
     public var rateLimiter: RateLimiter
     public var clock: any GatewayClock
     public var config: Config
@@ -34,7 +37,7 @@ public struct Dependencies: Sendable {
     public init(
         store: Store, eventLog: EventLog, grants: Grants, accessRequests: AccessRequests, monitor: Monitor,
         translator: Translator, mediaCache: MediaCache, sender: MessageSender? = nil, dispatcher: WebhookDispatcher?, telegram: any TelegramControl,
-        reloader: ConfigReloader? = nil, rateLimiter: RateLimiter, clock: any GatewayClock, config: Config, shutdown: ShutdownSignal = ShutdownSignal(),
+        reloader: ConfigReloader? = nil, links: LinkManager? = nil, rateLimiter: RateLimiter, clock: any GatewayClock, config: Config, shutdown: ShutdownSignal = ShutdownSignal(),
         startedAt: Date, version: String = "0.1.0", logger: Logger = Logger(label: "server")
     ) {
         self.store = store
@@ -48,6 +51,7 @@ public struct Dependencies: Sendable {
         self.dispatcher = dispatcher
         self.telegram = telegram
         self.reloader = reloader
+        self.links = links
         self.rateLimiter = rateLimiter
         self.clock = clock
         self.config = config
@@ -92,11 +96,22 @@ public struct GatewayRequestContext: RequestContext, WebSocketRequestContext {
     public var principal: Principal?
     public var requestId: String
     public var rateLimit: (limit: Int, remaining: Int)?
+    /// True for a request that arrived over a link to Volgenic (`InProcessAPI`).
+    public internal(set) var viaLink = false
 
     public init(source: Source) {
         coreContext = .init(source: source)
         webSocket = .init()
         requestId = Identifiers.requestTraceId()
+    }
+
+    /// A context for a request that arrives over a link to Volgenic rather than a socket
+    /// (`InProcessAPI`).
+    init(linkLogger: Logger) {
+        coreContext = .init(source: LinkRequestSource(logger: linkLogger))
+        webSocket = .init()
+        requestId = Identifiers.requestTraceId()
+        viaLink = true
     }
 
     public var maxUploadSize: Int { 64 * 1024 }
@@ -106,6 +121,10 @@ public struct GatewayRequestContext: RequestContext, WebSocketRequestContext {
         guard let principal else { throw APIError.missingToken }
         return principal
     }
+}
+
+struct LinkRequestSource: RequestContextSource {
+    let logger: Logger
 }
 
 // MARK: Header names

@@ -31,6 +31,11 @@ struct Health: AsyncParsableCommand {
             print("monitored     \(s["monitored_chat_count"]?.intValue ?? 0) chats   grants \(s["grant_count"]?.intValue ?? 0)   webhooks active=\(s["webhooks"]?["active"]?.intValue ?? 0) retrying=\(s["webhooks"]?["retrying"]?.intValue ?? 0) paused=\(s["webhooks"]?["paused"]?.intValue ?? 0)")
             print("backfill      in_progress=\(s["backfill"]?["in_progress"]?.boolValue ?? false) chats_pending=\(s["backfill"]?["chats_pending"]?.intValue ?? 0)   media_cache=\(s["media_cache_bytes"]?.intValue ?? 0) bytes")
         }
+        for link in s["links"]?.arrayValue ?? [] {
+            let state = link["state"]?.stringValue ?? "?"
+            let error = state == "connected" ? "" : (link["last_error"]?.stringValue).map { "  last error: \($0)" } ?? ""
+            print("link          \(link["base_url"]?.stringValue ?? "?")  \(state) since \(Admin.short(link["since"]))\(error)")
+        }
         print("started       \(Admin.short(s["started_at"]))")
     }
 }

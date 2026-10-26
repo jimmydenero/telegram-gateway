@@ -36,6 +36,7 @@ in seconds, for example `10s`.
 - [Health](#health)
 - [Admin: login](#admin-login)
 - [Admin: reload](#admin-reload)
+- [Admin: links to Volgenic](#admin-links-to-volgenic)
 - [Admin: pruning](#admin-pruning)
 - [Rate limits](#rate-limits)
 - [Not supported](#not-supported)
@@ -65,7 +66,8 @@ The default port is **41414**. It is set in the gateway's configuration file:
   "secrets": "file",
   "api_id": 12345,
   "api_hash": "0123abcd…",
-  "daemon_path": "/Applications/Telegram Gateway.app/Contents/MacOS/GatewayDaemon"
+  "daemon_path": "/Applications/Telegram Gateway.app/Contents/MacOS/GatewayDaemon",
+  "links": [{ "base_url": "https://volgenic.com" }]
 }
 ```
 
@@ -77,10 +79,11 @@ The default port is **41414**. It is set in the gateway's configuration file:
 | `secrets` | Where the admin token and the key of TDLib's database are kept: `"file"` (default: `secrets.json` next to `config.json`, mode 0600) or `"keychain"` (the macOS login Keychain, for a signed build of the menu bar app). See [development.md](development.md#secrets). |
 | `api_id`, `api_hash` | The gateway's identity with Telegram, which the user registers once at https://my.telegram.org. |
 | `daemon_path` | Written by the menu bar app for its own launcher. The gateway ignores it. |
+| `links` | The Volgenic servers the gateway links to ([link.md](link.md)), written by `tgw link add` and `tgw link remove`. Each link's token is in the secret store, not here. |
 
-Unknown keys are ignored, so tools may add their own. Changes to `api_id` and `api_hash` take
-effect on `POST /v1/admin/reload` ([Admin: reload](#admin-reload)); changes to the other keys
-take effect when the gateway restarts.
+Unknown keys are ignored, so tools may add their own. Changes to `api_id`, `api_hash` and
+`links` take effect on `POST /v1/admin/reload` ([Admin: reload](#admin-reload)); changes to
+the other keys take effect when the gateway restarts.
 
 **TDLib** is Telegram's official client library; the gateway embeds it to speak to Telegram.
 It appears in this document only where its behaviour shows through.
@@ -91,7 +94,8 @@ how a second gateway is run during development. `TGW_HOME` overrides the data di
 menu bar app read the same file, so they always find the gateway.
 
 The gateway binds `127.0.0.1` only, never `0.0.0.0`. There is no TLS, because nothing leaves
-the machine except webhooks.
+the machine except webhooks and the outbound links to Volgenic ([link.md](link.md)), which
+the gateway dials itself.
 
 ### JSON
 
@@ -1081,6 +1085,7 @@ Admin. Everything in `/v1/health`, plus:
 | `oldest_seq` | The oldest retained `seq`, or `null` when the log is empty. |
 | `media_cache_bytes` | Current size of the media cache. |
 | `backfill` | `{ "in_progress": false, "chats_pending": 0 }`: whether the gateway is fetching messages it missed while offline. |
+| `links` | The links to Volgenic and their state, as in [Admin: links to Volgenic](#admin-links-to-volgenic). An empty array when there are none. Absent when the request comes over a link. |
 
 ---
 
@@ -1133,20 +1138,26 @@ The gateway passes the phone number, codes and password to TDLib and stores none
 ## Admin: reload
 
 `POST /v1/admin/reload` makes the gateway re-read `config.json` and bring its Telegram session
-in line with it, without a restart. The event log, grants, webhook cursors and open WebSocket
+and its links to Volgenic in line with it, without a restart. The event log, grants, webhook cursors and open WebSocket
 connections are untouched. The menu bar app calls it after saving `api_id` and `api_hash`;
 `tgw daemon reload` calls it from the command line. There is no request body.
 
 Response `200`:
 
 ```json
-{ "reloaded": true, "telegram": "started", "restart_required": [] }
+{
+  "reloaded": true,
+  "telegram": "started",
+  "restart_required": [],
+  "links": { "started": ["https://volgenic.com"], "restarted": [], "stopped": [], "unchanged": [] }
+}
 ```
 
 | Field | Meaning |
 |---|---|
 | `telegram` | What happened to the Telegram session, below. |
 | `restart_required` | Keys that changed in `config.json` but take effect only when the gateway restarts: any of `port`, `secrets`, `events_retention_days` and `media_cache_max_bytes`. Empty when none changed. |
+| `links` | What happened to the links, by base URL: `started` (new), `restarted` (a new token, or a link Volgenic had refused, tried again), `stopped` (removed, or its token is gone), `unchanged`. Each link's token is read from the secret store at this moment. |
 
 | `telegram` | Meaning |
 |---|---|
@@ -1164,6 +1175,40 @@ to call after every save.
 | Another reload is still running | `409 reload_in_progress` |
 | The old session did not confirm that it closed | `500 internal`. No new session is created; the gateway must be restarted. |
 | App token | `403 admin_only` |
+
+---
+
+## Admin: links to Volgenic
+
+A **link** is an outbound WebSocket from the gateway to a Volgenic server, over which that
+Volgenic account drives the gateway with the admin token's powers, except anything to do
+with secrets. [link.md](link.md) specifies the protocol. Links are added and removed with
+`tgw link add` and `tgw link remove`, which edit `config.json` and the secret store and then
+call `POST /v1/admin/reload`.
+
+`GET /v1/admin/links` returns every configured link and its state:
+
+```json
+{
+  "links": [
+    {
+      "base_url": "https://volgenic.com",
+      "state": "connected",
+      "connected": true,
+      "since": "2026-10-26T14:03:07.412Z",
+      "last_error": null,
+      "last_error_at": null,
+      "retry_at": null
+    }
+  ]
+}
+```
+
+`state` is `connecting`, `connected`, `waiting` (to retry at `retry_at`), `unauthorized`
+(Volgenic refused the token; no more attempts until the link is added again or the gateway
+reloads), `no_token` (no token in the secret store) or `stopped`. `since` is when the link
+entered that state; `last_error` is the most recent failure and stays after the link
+recovers. A link cannot call this endpoint.
 
 ---
 
@@ -1227,7 +1272,7 @@ per-token budget and carry neither header.
 |---|---|
 | Acting on the account beyond sending text (marking as read, joining or leaving chats, appearing online, editing or deleting messages) | Not possible. The only action is [sending a text message](#sending-messages) with `messages:send`. |
 | Sending photos, files, stickers or formatted text | Messages are plain text only. |
-| Reaching the API from another machine | The gateway listens on `127.0.0.1` only. An app on another machine receives events through a [webhook](#webhooks); the WebSocket, history and media endpoints are reachable only from the Mac that runs the gateway. |
+| Reaching the API from another machine | The gateway listens on `127.0.0.1` only. An app on another machine receives events through a [webhook](#webhooks); the WebSocket, history and media endpoints are reachable only from the Mac that runs the gateway. The one exception is a Volgenic server the user linked with `tgw link add`: the gateway dials it and carries its requests ([link.md](link.md)). |
 | Calling the API from a web page | No CORS headers, and the WebSocket needs an `Authorization` header, which browsers cannot set. |
 | More than one Telegram account | One gateway is signed in to one account. |
 | Secret chats | They cannot be monitored and never appear. |
@@ -1260,7 +1305,8 @@ per-token budget and carry neither header.
 | admin | GET | `/v1/admin/status` | | Full status |
 | admin | GET | `/v1/admin/auth` | | Sign-in state |
 | admin | POST | `/v1/admin/auth/{qr,phone,code,password,email,email_code,logout}` | | Drive the sign-in |
-| admin | POST | `/v1/admin/reload` | | Re-read `config.json`; apply a new `api_id` / `api_hash` in place |
+| admin | POST | `/v1/admin/reload` | | Re-read `config.json`; apply a new `api_id` / `api_hash` and the links in place |
+| admin | GET | `/v1/admin/links` | | Links to Volgenic and their state |
 | admin | GET | `/v1/admin/access-requests` | | Pending requests |
 | admin | POST | `/v1/admin/access-requests/{id}/approve` | | Approve, optionally narrowed |
 | admin | POST | `/v1/admin/access-requests/{id}/deny` | | Deny |
