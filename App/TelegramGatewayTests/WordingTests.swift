@@ -12,6 +12,8 @@ struct WordingTests {
         #expect(Permission.name("media:read") == "Photos and files")
         #expect(Permission.name("chats:read") == "Chat names and details")
         #expect(Permission.name("messages:send") == "Send messages")
+        #expect(Permission.meaning("messages:send").contains("as you"))
+        #expect(Permission.reading(["messages:send", "chats:read", "messages:read"]) == ["messages:read", "chats:read"])
         // A scope this version does not know is shown as it is rather than hidden.
         #expect(Permission.name("reactions:read") == "reactions:read")
         for scope in Permission.order {

@@ -224,11 +224,21 @@ struct AppDetailPane: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     if grant.needsAttention { delivery }
-                    LabeledSection("Can read") {
-                        RowCard {
-                            ForEach(Permission.sorted(grant.scopes), id: \.self) { scope in
-                                TitleAndDetail(title: Permission.name(scope), detail: Permission.meaning(scope))
-                                    .help(scope)
+                    if !Permission.reading(grant.scopes).isEmpty {
+                        LabeledSection("Can read") {
+                            RowCard {
+                                ForEach(Permission.reading(grant.scopes), id: \.self) { scope in
+                                    TitleAndDetail(title: Permission.name(scope), detail: Permission.meaning(scope))
+                                        .help(scope)
+                                }
+                            }
+                        }
+                    }
+                    if grant.scopes.contains(Permission.send) {
+                        LabeledSection("Can send") {
+                            RowCard {
+                                TitleAndDetail(title: Permission.name(Permission.send), detail: Permission.meaning(Permission.send))
+                                    .help(Permission.send)
                             }
                         }
                     }
@@ -343,19 +353,19 @@ struct ApproveSheet: View {
                             if draft.followFolder { folderCard(draft) } else { chatsCard(draft) }
                         }
 
-                        LabeledSection("Can read") {
-                            RowCard(inset: 26) {
-                                ForEach(Permission.sorted(draft.request.scopes), id: \.self) { scope in
-                                    HStack(spacing: 10) {
-                                        Toggle("", isOn: scopeBinding(scope))
-                                            .toggleStyle(.checkbox)
-                                            .labelsHidden()
-                                        TitleAndDetail(title: Permission.name(scope), detail: Permission.meaning(scope))
-                                        Spacer(minLength: 0)
+                        if !Permission.reading(draft.request.scopes).isEmpty {
+                            LabeledSection("Can read") {
+                                RowCard(inset: 26) {
+                                    ForEach(Permission.reading(draft.request.scopes), id: \.self) { scope in
+                                        scopeToggle(scope)
                                     }
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { scopeBinding(scope).wrappedValue.toggle() }
-                                    .help(scope)
+                                }
+                            }
+                        }
+                        if draft.request.scopes.contains(Permission.send) {
+                            LabeledSection("Can send") {
+                                RowCard(inset: 26) {
+                                    scopeToggle(Permission.send)
                                 }
                             }
                         }
@@ -473,6 +483,20 @@ struct ApproveSheet: View {
             set: { on in
                 if on { model.approval?.chatIds.insert(id) } else { model.approval?.chatIds.remove(id) }
             })
+    }
+
+    /// One permission with its checkbox, in the approval sheet.
+    private func scopeToggle(_ scope: String) -> some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: scopeBinding(scope))
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+            TitleAndDetail(title: Permission.name(scope), detail: Permission.meaning(scope))
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { scopeBinding(scope).wrappedValue.toggle() }
+        .help(scope)
     }
 
     private func scopeBinding(_ scope: String) -> Binding<Bool> {

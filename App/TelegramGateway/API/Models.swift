@@ -562,7 +562,7 @@ enum Scope {
         case "history:read": "Read past messages from Telegram"
         case "media:read": "Download photos, videos and files"
         case "chats:read": "List the granted chats and learn when coverage changes"
-        case "messages:send": "Send messages (reserved, not available)"
+        case "messages:send": "Send messages as you in the granted chats"
         default: "Unknown scope"
         }
     }
