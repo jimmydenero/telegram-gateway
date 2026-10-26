@@ -140,6 +140,9 @@ through the same authentication, rate limits and error handling that `tgw` meets
   `{"error": {"code": "too_large", "message": "…", "details": {}}}`. `Range` requests are not
   available over the link. A media file that is still downloading answers `202` with a JSON
   body, as on the local API: ask again.
+- Requests count against the admin token's rate limits ([api.md](api.md#rate-limits)),
+  which the menu bar app and `tgw` share: 600 per minute in all, 60 history reads and 20
+  sends per minute.
 - Requests run concurrently and responses arrive in any order; `id` correlates them. The
   gateway never gives up on a request itself (sending waits up to `30s` for Telegram, media
   up to `30s` for the download); a request unanswered after `01:00` is Volgenic's to time
@@ -170,7 +173,7 @@ All existing endpoints, specified in [api.md](api.md):
 | History | `GET /v1/chats/{chat_id}/messages?before=…&limit=…` |
 | Media | `GET /v1/media/{media_id}` |
 | Sending | `POST /v1/chats/{chat_id}/messages` with `{"text", "reply_to"}`: the admin token may send to any monitored chat |
-| State | `GET /v1/admin/status`, `GET /v1/health` |
+| State | `GET /v1/admin/status` (without its `links` list over a link), `GET /v1/health` |
 
 ### `subscribe` (Volgenic → gateway) and `event`
 

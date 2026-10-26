@@ -1085,7 +1085,7 @@ Admin. Everything in `/v1/health`, plus:
 | `oldest_seq` | The oldest retained `seq`, or `null` when the log is empty. |
 | `media_cache_bytes` | Current size of the media cache. |
 | `backfill` | `{ "in_progress": false, "chats_pending": 0 }`: whether the gateway is fetching messages it missed while offline. |
-| `links` | The links to Volgenic and their state, as in [Admin: links to Volgenic](#admin-links-to-volgenic). An empty array when there are none. |
+| `links` | The links to Volgenic and their state, as in [Admin: links to Volgenic](#admin-links-to-volgenic). An empty array when there are none. Absent when the request comes over a link. |
 
 ---
 

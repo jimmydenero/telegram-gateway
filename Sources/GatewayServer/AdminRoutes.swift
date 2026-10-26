@@ -11,7 +11,7 @@ struct AdminRoutes {
     let deps: Dependencies
 
     func register(on group: RouterGroup<GatewayRequestContext>) {
-        group.get("/status") { _, _ in try await status() }
+        group.get("/status") { _, context in try await status(viaLink: context.viaLink) }
         group.post("/reload") { _, _ in try await reload() }
         group.get("/links") { _, _ in json(["links": await linksJSON()]) }
         group.get("/auth") { _, _ in try await auth() }
@@ -59,7 +59,8 @@ struct AdminRoutes {
 
     // MARK: Status and login
 
-    func status() async throws -> Response {
+    /// Over a link the `links` list is left out: it may name links to other Volgenic servers.
+    func status(viaLink: Bool = false) async throws -> Response {
         let authState = await deps.telegram.authStateName()
         let connection = await deps.telegram.connectionState()
         let grants = try await deps.grants.list(includeRevoked: false)
@@ -68,7 +69,7 @@ struct AdminRoutes {
             if let state = grant.webhook?.state.rawValue { webhooks[state, default: 0] += 1 }
         }
         let backfill = await deps.monitor.backfill
-        return json([
+        var body: JSONObjectValue = [
             "status": authState == "ready" && connection == .ready ? "ok" : "degraded",
             "version": .string(deps.version),
             "started_at": .date(deps.startedAt),
@@ -84,8 +85,9 @@ struct AdminRoutes {
             "oldest_seq": .optional(try await deps.eventLog.oldestSeq()),
             "media_cache_bytes": .number(Double(try await deps.mediaCache.cachedBytes())),
             "backfill": ["in_progress": .bool(backfill.inProgress), "chats_pending": .number(Double(backfill.chatsPending))],
-            "links": await linksJSON(),
-        ])
+        ]
+        if !viaLink { body["links"] = await linksJSON() }
+        return json(.object(body))
     }
 
     /// Every link to Volgenic and its state (docs/link.md "Link state").
