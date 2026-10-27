@@ -607,6 +607,7 @@ tgw chat pin <chat> [--undo]
 tgw chat archive <chat> [--undo]
 tgw chat mute <chat> [--for 8:00:00] [--undo]
 tgw chat start <username> [--phone]
+tgw read <chat> [--up-to <message>] [--mentions]   # senders see read receipts
 ```
 
 `send --file` sends a document unless `--kind` says otherwise, and guesses the MIME type
