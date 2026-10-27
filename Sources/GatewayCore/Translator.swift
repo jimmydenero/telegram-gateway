@@ -81,6 +81,7 @@ public actor Translator {
     /// The last reactions and poll seen per message, so that a view-count change or a repeated
     /// update produces nothing. Bounded; most recent last.
     private var lastReactions = BoundedMemo<MessageKey, [Reaction]>(capacity: 4096)
+    private var deletedMessages = BoundedMemo<MessageKey, Bool>(capacity: 4096)
     private var lastPolls = BoundedMemo<MessageKey, Poll>(capacity: 1024)
 
     private struct MessageKey: Hashable {
@@ -265,7 +266,12 @@ public actor Translator {
         case "updateDeleteMessages":
             guard update.bool("is_permanent") == true, update.bool("from_cache") != true,
                   let chatId = update.int64("chat_id"), let ids = update.array("message_ids") else { return [] }
-            let publicIds = ids.compactMap(Translator.int64).map(MessageId.toPublic)
+            let publicIds = ids.compactMap(Translator.int64).map(MessageId.toPublic).filter { id in
+                let key = MessageKey(chatId: chatId, messageId: id)
+                guard deletedMessages[key] != true else { return false }
+                deletedMessages[key] = true
+                return true
+            }
             guard !publicIds.isEmpty else { return [] }
             return [.messageDeleted(chatId: chatId, messageIds: publicIds)]
 

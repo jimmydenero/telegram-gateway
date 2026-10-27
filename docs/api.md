@@ -31,6 +31,7 @@ in seconds, for example `10s`.
 - [Events](#events): paged backlog and WebSocket stream
 - [History](#history)
 - [Sending messages](#sending-messages)
+- [Message and chat actions](#message-and-chat-actions): forward, edit, delete, react, vote, chat settings, new chats
 - [Media](#media)
 - [Webhooks](#webhooks)
 - [Health](#health)
@@ -260,10 +261,10 @@ empty, whose keys are listed per code below.
 | 409 | `reload_in_progress` | A reload was requested while another one is still running ([Admin: reload](#admin-reload)). | |
 | 410 | `history_pruned` | `since` points below the oldest retained event ([Retention](#retention)). | `oldest_seq` |
 | 410 | `media_gone` | Telegram can no longer supply the file (the message was deleted, or Telegram expired the file). | `media_id` |
-| 413 | `payload_too_large` | Request body over 64 KiB. | |
+| 413 | `payload_too_large` | Request body over 64 KiB, or over 28,027,564 bytes for a send with a file ([Sending files](#sending-files)). | |
 | 429 | `rate_limited` | See [Rate limits](#rate-limits). The `Retry-After` header is set, in seconds. | `retry_after` |
 | 500 | `internal` | A bug in the gateway. Report it with the `X-TGW-Request-Id`. | |
-| 502 | `send_failed` | Telegram refused to send a message ([Sending messages](#sending-messages)). | `reason`, `telegram_code` |
+| 502 | `send_failed` | Telegram refused to send a message or carry out an action ([Sending messages](#sending-messages), [Message and chat actions](#message-and-chat-actions)). | `reason`, `telegram_code` |
 | 503 | `not_logged_in` | The gateway has no Telegram session: the user has not signed in. | `auth_state` |
 | 503 | `telegram_unavailable` | The endpoint needs a live connection to Telegram (history, sending, media, folders) and the connection is down. Endpoints served from the gateway's own store (events, chats, grants) keep working. | `connection_state` |
 | 504 | `send_timeout` | Telegram did not confirm a message within `30s`. It may still be sent ([Sending messages](#sending-messages)). | `chat_id` |
@@ -824,7 +825,7 @@ of the chat is therefore followed by one empty page with `has_more: false`.
 
 ## Sending messages
 
-`POST /v1/chats/{chat_id}/messages` sends a text message to a chat **as the user**: it goes
+`POST /v1/chats/{chat_id}/messages` sends a text or media message to a chat **as the user**: it goes
 out from the user's Telegram account, and everyone in the chat sees it as written by them. It
 requires `messages:send`, and the chat must be in the grant's `effective_chat_ids` (for the
 admin token: monitored). The gateway sends only to chats it monitors.
@@ -839,8 +840,11 @@ Content-Type: application/json
 
 | Field | Required | Rules |
 |---|---|---|
-| `text` | yes | Plain text, sent as written: no Markdown, no formatting entities. Not empty or only whitespace. At most 4096 characters as Telegram counts them, in UTF-16 code units, so an emoji outside the Basic Multilingual Plane counts as two. |
+| `text` | unless media | Text, sent as written; formatting uses `entities`, not Markdown. Not empty or only whitespace. At most 4096 characters as Telegram counts them, in UTF-16 code units, so an emoji outside the Basic Multilingual Plane counts as two. |
 | `reply_to` | no | The id of a message in the same chat, as a string. The new message is sent as a reply to it. |
+| `entities` | no | Formatting: bold, links, mentions and so on, as an array of [formatting entities](events.md#entities) over `text` (or over the caption when sending media). At most 100. |
+| `media` | no | A file to send: a photo, video, document, voice note, audio file, animation or sticker. See [Sending files](#sending-files). |
+| `silent` | no | `true` sends the message without a notification sound for the people in the chat. Default `false`. |
 
 The gateway hands the message to Telegram and waits for Telegram to confirm that its servers
 stored it, up to `30s`. Response `201 Created` with the message as Telegram stored it, with
@@ -876,7 +880,9 @@ phone, including the app that sent it: deduplicate on the message id if that mat
 |---|---|
 | The grant lacks `messages:send` | `403 insufficient_scope` |
 | The chat is outside the grant, not monitored, or does not exist | `403 chat_not_granted` |
-| `text` missing or not a string; `reply_to` not a message id string | `400 invalid_request` with `details.field` |
+| `text` missing (and no `media`) or not a string; `reply_to` not a message id string; an entity outside the text | `400 invalid_request` with `details.field` |
+| `media` invalid: unknown kind, bad base64, a file name with a path in it | `400 invalid_request` with `details.field` |
+| The file is over 20 MiB, or the request body over its limit | `413 payload_too_large` |
 | `text` empty or only whitespace | `400 invalid_request` with `details.field: "text"`, `details.reason: "empty"` |
 | `text` over 4096 characters | `400 invalid_request` with `details.field: "text"`, `details.reason: "too_long"`, `details.max_length: 4096` |
 | More than 20 sends in a minute from this token | `429 rate_limited` |
@@ -893,6 +899,175 @@ The gateway does not retry a send, never marks the chat as read, and never makes
 appear online to send. Telegram itself counts sending as activity of the account; how it
 reflects that on the user's other devices has not been verified
 ([status.md](status.md)).
+
+---
+
+## Message and chat actions
+
+Besides sending, an app can do most of what a person does with their own messages in the
+Telegram app: forward messages, edit and delete what it sent, react, vote in polls, and
+(with a second scope) pin, archive and mute chats or start a new one. Everything here acts
+**as the user**, on their real account, and the people in the chat see it as theirs.
+
+Every action goes through the same checks as [sending](#sending-messages), in this order:
+the scope (`403 insufficient_scope`); that the grant has not been revoked
+(`401 token_revoked`); that each chat involved is in the grant's `effective_chat_ids` and
+monitored, or for the admin token monitored (`403 chat_not_granted`); the request body
+(`400 invalid_request`); the rate limit (`429 rate_limited`); and a live Telegram session
+(`503 not_logged_in`, `503 telegram_unavailable`). The rate limit is the one sending uses:
+20 requests per minute per token, shared by sending and all the actions below. When
+Telegram refuses an action the answer is `502 send_failed`, with Telegram's text in
+`details.reason`; when Telegram asks the account to slow down (a **flood wait**), it is
+`429 rate_limited` with Telegram's wait in `retry_after`. The gateway never retries an
+action on its own.
+
+No action marks a message as read, opens a chat, shows "typing…" or makes the account appear
+online. Reacting and voting work on a chat that is not open in the Telegram sense.
+
+| Action | Method and path | Scope | Success |
+|---|---|---|---|
+| Send text or a file | `POST /v1/chats/{chat_id}/messages` | `messages:send` | `201 {"message": …}` |
+| Forward | `POST /v1/chats/{chat_id}/forward` | `messages:send`, for both chats | `201 {"messages": […]}` |
+| Edit | `PATCH /v1/chats/{chat_id}/messages/{message_id}` | `messages:send` | `200 {"message": …}` |
+| Delete | `DELETE /v1/chats/{chat_id}/messages` | `messages:send` | `204` |
+| Add a reaction | `PUT /v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | `204` |
+| Remove a reaction | `DELETE /v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | `204` |
+| Vote in a poll | `POST /v1/chats/{chat_id}/messages/{message_id}/poll` | `messages:send` | `204` |
+| Pin, archive, mute | `PATCH /v1/chats/{chat_id}` | `chats:manage` | `200 {"chat": …}` |
+| Start a chat | `POST /v1/chats` | `chats:manage` | `201 {"chat": …}` |
+
+Messages and chats come back in the [message object](events.md#message-object) and
+[chat object](#the-chat-object) formats. Ids are strings, as everywhere in the API.
+
+**Results reach the event stream the normal way, once each.** A response never adds an event
+of its own. The change arrives from Telegram and becomes the ordinary event: a forwarded
+message is a `message.new`, an edit `message.edited`, a deletion `message.deleted`, a reaction
+`message.reactions`, a vote `poll.updated`, and a pin, archive or mute `chat.position` or
+`chat.updated` ([events.md](events.md)). Telegram may send the same change twice; the gateway
+records it once.
+
+### Forward
+
+```json
+{ "from_chat_id": "-1001987654321", "message_ids": ["1522", "1523"], "send_copy": false }
+```
+
+Forwards messages from `from_chat_id` into `{chat_id}`. Both chats must pass the chat check.
+`message_ids` holds 1 to 100 distinct ids; they are forwarded oldest first. With
+`send_copy: true` the messages arrive as new messages, without the "Forwarded from" header.
+Like a send, the gateway waits up to `30s` for Telegram to confirm each forwarded message,
+and returns them with their final ids. Telegram may forward some messages and refuse others,
+and nothing already forwarded is taken back: after an error or `504 send_timeout`, check the
+event stream before forwarding again.
+
+### Edit
+
+```json
+{ "text": "Fixed in 2.4.2, not 2.4.1.", "entities": [] }
+```
+
+Replaces the text of one of the account's own messages; for a photo, video or other file it
+replaces the caption (which may be empty). Any message not sent by the account is refused
+with `400 invalid_request`, `details.field: "message_id"`, also for the admin token.
+`entities` works as in a send. The response is the edited message.
+
+### Delete
+
+```json
+{ "message_ids": ["1530", "1531"], "for_everyone": true }
+```
+
+Deletes 1 to 100 of the account's own messages. `for_everyone` is required: `true` deletes
+them for everyone in the chat, `false` only from the account's own view. Before deleting
+anything the gateway asks Telegram whether each message can be deleted that way (Telegram
+allows deleting for everyone only within limits it sets). If any message is not the
+account's own or cannot be deleted that way, nothing is deleted and the answer is
+`400 invalid_request`.
+
+### Reactions
+
+```json
+{ "emoji": "👍", "big": false }
+```
+
+`PUT` adds the account's reaction to a message; `DELETE` on the same path, with the same
+body, removes it. Give exactly one of `emoji` (a standard emoji reaction) or
+`custom_emoji_id` (a Premium custom emoji, as an id string). `big: true` plays the large
+animation. Which reactions a chat allows is up to the chat; Telegram's refusal comes back as
+`502 send_failed`. Paid reactions are not supported.
+
+### Vote in a poll
+
+```json
+{ "option_ids": [0, 2] }
+```
+
+`option_ids` are positions in the poll's `options` array as the event shows it, counting
+from 0. More than one only if the poll allows several answers. An empty array takes the
+account's vote back. The new counts arrive as `poll.updated`.
+
+### Chat settings
+
+```json
+{ "is_pinned": true, "is_archived": false, "is_muted": true, "mute_until": 1793000000 }
+```
+
+Any of the fields, at least one:
+
+| Field | Effect |
+|---|---|
+| `is_pinned` | Pins the chat to the top of the main chat list, or unpins it. |
+| `is_archived` | Moves the chat to the Archive, or back to the main list. |
+| `is_muted` | `true` turns off notifications for the chat, `false` turns them back on. Other notification settings stay as they were. |
+| `mute_until` | With `is_muted: true` only: when to unmute by itself, as a Unix time in seconds. Without it a mute lasts until undone. A time in the past unmutes. |
+
+The settings are applied one after another, so if Telegram refuses one, the ones before it
+stay applied. The response is the chat as it stands afterwards.
+
+### Start a chat
+
+```json
+{ "username": "acme_support" }
+```
+```json
+{ "phone": "+15551234567" }
+```
+
+Finds a chat by public username, or a person by phone number (who must allow being found
+that way, or be in the account's contacts), and returns the chat with them. This does not
+join a group or channel and sends nothing; it only makes the chat known to the account. For
+the admin token the chat is then added to the monitored set. An app cannot widen its own
+access this way: the chat it finds must already be in its grant, or the answer is
+`403 chat_not_granted`.
+
+### Sending files
+
+`media` in a send is an object:
+
+| Field | Required | Rules |
+|---|---|---|
+| `kind` | yes | `photo`, `video`, `document`, `voice` (a voice note), `audio`, `animation` (a GIF or silent video) or `sticker`. |
+| `data_base64` | yes | The file, base64-encoded. At most 20 MiB (20,971,520 bytes) before encoding. |
+| `file_name` | yes | A plain file name, without any directory, for example `report.pdf`. |
+| `mime_type` | yes | The file's type, for example `image/jpeg`. A voice note must be Ogg/Opus: `audio/ogg`, `audio/opus` or `application/ogg`. Telegram judges the file by its contents; the type does not make it accept a file of another kind. |
+| `caption` | no | Text shown with the file, at most 1024 characters as Telegram counts them. `text` in the request body works as the caption too; give one or the other. Stickers have no caption. |
+| `duration` | no | Seconds, for `video`, `animation`, `audio` and `voice`. |
+| `width`, `height` | no | Pixels, for `photo`, `video`, `animation` and `sticker`. |
+| `waveform` | no | For `voice` only: the waveform drawn in the message, base64 of Telegram's 5-bit samples, at most 1024 bytes. |
+
+Metadata given for a kind that does not have it is refused with `400 invalid_request`. When
+`duration` or `waveform` are left out, Telegram's client library works out what it can from
+the file; how well it does for voice notes has not been verified against a live account, so
+send them if you have them.
+
+A request with a file may be up to 28,027,564 bytes: the base64 of 20 MiB plus 64 KiB for
+the rest. Every other request body is limited to 64 KiB.
+
+The gateway writes the file to `uploads/` inside its data directory, readable only by the
+user, and gives Telegram its path. The file is deleted as soon as Telegram confirms or
+refuses the message. After a `504 send_timeout` it stays until Telegram's late answer, since
+the upload may still be under way. If the gateway stops before then, the next start deletes
+upload files older than `24:00:00` (24 hours).
 
 ---
 
@@ -1280,7 +1455,7 @@ Telegram) and the gateway's database.
 |---|---|
 | All requests, per token | 600 per minute |
 | `GET /v1/chats/{chat_id}/messages` | 60 per minute |
-| `POST /v1/chats/{chat_id}/messages` | 20 per minute |
+| `POST /v1/chats/{chat_id}/messages` and every [action](#message-and-chat-actions), together | 20 per minute |
 | `GET /v1/media/{media_id}`, uncached | 4 concurrent downloads per token |
 | `POST /v1/access-requests` | 10 per minute in total |
 | `GET /v1/access-requests/{id}` | 1 per 2s per request id |
@@ -1297,15 +1472,16 @@ per-token budget and carry neither header.
 
 | Not supported | What happens instead |
 |---|---|
-| Acting on the account beyond sending text (marking as read, joining or leaving chats, appearing online, editing or deleting messages) | Not possible. The only action is [sending a text message](#sending-messages) with `messages:send`. |
-| Sending photos, files, stickers or formatted text | Messages are plain text only. |
+| Marking messages read, showing "typing…", joining or leaving groups and channels, appearing online | Not possible. |
+| Sending several files as one album, scheduling messages, sending into a forum topic | Not supported; each file is its own message. |
+| Editing or deleting other people's messages, even as a group admin | Not possible; only the account's own messages. |
 | Reaching the API from another machine | The gateway listens on `127.0.0.1` only. An app on another machine receives events through a [webhook](#webhooks); the WebSocket, history and media endpoints are reachable only from the Mac that runs the gateway. The one exception is a Volgenic server the user linked with `tgw link add`: the gateway dials it and carries its requests ([link.md](link.md)). |
 | Calling the API from a web page | No CORS headers, and the WebSocket needs an `Authorization` header, which browsers cannot set. |
 | More than one Telegram account | One gateway is signed in to one account. |
 | Secret chats | They cannot be monitored and never appear. |
 | Changing a grant's scopes or chat list in place | The user revokes the grant and the app requests access again. A folder-based grant does follow its folder ([grants.md](grants.md#folder-based-grants)). |
 | Expiring or rotating an app token | Tokens do not expire. Access ends when the user revokes the grant. |
-| Reactions, view counts, polls, text formatting, forum topics | Not part of the event format: see [events.md](events.md#not-supported). |
+| Paid reactions | Not supported. |
 | Operating systems other than macOS | The gateway runs on macOS only. Apps can run anywhere a webhook can reach. |
 
 ---
@@ -1327,7 +1503,14 @@ per-token budget and carry neither header.
 | app | GET | `/v1/events` | `messages:read` or `chats:read` | Paged backlog |
 | app | GET | `/v1/events/stream` | `messages:read` or `chats:read` | WebSocket stream |
 | app | GET | `/v1/chats/{chat_id}/messages` | `history:read` | History from Telegram |
-| app | POST | `/v1/chats/{chat_id}/messages` | `messages:send` | Send a text message as the user |
+| app | POST | `/v1/chats/{chat_id}/messages` | `messages:send` | Send text or a file as the user |
+| app | POST | `/v1/chats/{chat_id}/forward` | `messages:send` | Forward messages |
+| app | PATCH | `/v1/chats/{chat_id}/messages/{message_id}` | `messages:send` | Edit the account's own message |
+| app | DELETE | `/v1/chats/{chat_id}/messages` | `messages:send` | Delete the account's own messages |
+| app | PUT, DELETE | `/v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | Add or remove the account's reaction |
+| app | POST | `/v1/chats/{chat_id}/messages/{message_id}/poll` | `messages:send` | Vote in a poll, or take the vote back |
+| app | PATCH | `/v1/chats/{chat_id}` | `chats:manage` | Pin, archive or mute a chat |
+| app | POST | `/v1/chats` | `chats:manage` | Find a chat by username or phone number |
 | app | GET, HEAD | `/v1/media/{media_id}` | `media:read` | File bytes |
 | admin | GET | `/v1/admin/status` | | Full status |
 | admin | GET | `/v1/admin/auth` | | Sign-in state |

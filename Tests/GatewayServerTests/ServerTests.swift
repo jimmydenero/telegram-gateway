@@ -22,7 +22,7 @@ struct App {
     let deps: Dependencies
     let application: Application<RouterResponder<GatewayRequestContext>>
 
-    init(config: Config = Config(), maxMediaBytes: Int64 = 1 << 30) async throws {
+    init(config: Config = Config(), maxMediaBytes: Int64 = 1 << 30, uploadDirectory: URL? = nil) async throws {
         store = try Store.inMemory()
         clock = ManualClock(now: Date(timeIntervalSince1970: 1_790_000_000))
         tdlib = FakeTDLib()
@@ -38,7 +38,7 @@ struct App {
         deps = Dependencies(
             store: store, eventLog: eventLog, grants: grants,
             accessRequests: AccessRequests(store: store, grants: grants, clock: clock), monitor: monitor, translator: translator,
-            mediaCache: MediaCache(store: store, tdlib: tdlib, maxBytes: maxMediaBytes, clock: clock), dispatcher: nil,
+            mediaCache: MediaCache(store: store, tdlib: tdlib, maxBytes: maxMediaBytes, clock: clock), uploadDirectory: uploadDirectory, dispatcher: nil,
             telegram: telegram, rateLimiter: RateLimiter(clock: clock), clock: clock, config: config, startedAt: clock.now, logger: logger
         )
         application = GatewayServer.buildApplication(deps: deps, port: 0, logger: logger)
