@@ -166,6 +166,10 @@ public actor Store {
                 );
                 """)
         }
+        // A chat's read state and list position (`ChatState`) as JSON; null until known.
+        migrator.registerMigration("v2-chat-state") { db in
+            try db.execute(sql: "ALTER TABLE chats ADD COLUMN state TEXT")
+        }
         try migrator.migrate(db)
     }
 
@@ -268,18 +272,30 @@ public actor Store {
 
     // MARK: Chats cache
 
+    /// The stored state is kept once there is one: only the monitor changes it, through
+    /// `setChatState`, so that it compares each update with what it last recorded.
     public func upsertChat(_ chat: ChatInfo, now: Date) throws {
+        let state = try chat.state.map(encode)
         try db.write { db in
             try db.execute(sql: """
-                INSERT INTO chats (id, type, title, username, member_count, photo_media_id, photo_width, photo_height, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO chats (id, type, title, username, member_count, photo_media_id, photo_width, photo_height, updated_at, state)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET type = excluded.type, title = excluded.title, username = excluded.username,
                     member_count = excluded.member_count, photo_media_id = excluded.photo_media_id,
-                    photo_width = excluded.photo_width, photo_height = excluded.photo_height, updated_at = excluded.updated_at
+                    photo_width = excluded.photo_width, photo_height = excluded.photo_height, updated_at = excluded.updated_at,
+                    state = COALESCE(chats.state, excluded.state)
                 """, arguments: [
                     chat.id, chat.type.rawValue, chat.title, chat.username, chat.memberCount,
-                    chat.photo?.mediaId, chat.photo?.width, chat.photo?.height, now.timeIntervalSince1970,
+                    chat.photo?.mediaId, chat.photo?.width, chat.photo?.height, now.timeIntervalSince1970, state,
                 ])
+        }
+    }
+
+    /// Replaces a cached chat's read state and position. No-op for a chat not in the cache.
+    public func setChatState(chatId: Int64, _ state: ChatState) throws {
+        let text = try encode(state)
+        try db.write { db in
+            try db.execute(sql: "UPDATE chats SET state = ? WHERE id = ?", arguments: [text, chatId])
         }
     }
 
@@ -315,7 +331,8 @@ public actor Store {
             title: row["title"],
             username: row["username"],
             memberCount: row["member_count"],
-            photo: photo
+            photo: photo,
+            state: (row["state"] as String?).flatMap { try? JSONDecoder().decode(ChatState.self, from: Data($0.utf8)) }
         )
     }
 

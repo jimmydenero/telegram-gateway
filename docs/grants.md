@@ -60,7 +60,7 @@ event log or delivered.](images/grants.png)
 | An app can | An app cannot |
 |---|---|
 | Read messages in chats that are both granted to it and monitored, if it holds `messages:read`. This includes messages the user sends in those chats. | Read any other chat: private conversations, unmonitored groups and channels, or chats granted to a different app. |
-| See who sent each message: display name, username and numeric id. | See the user's phone number, contacts, read state, or anything about the account beyond which messages it sent. |
+| See who sent each message: display name, username and numeric id, plus read counts, receipts and mute state in its chat summary. | See the user's phone number or contacts. |
 | Read the earlier timeline of a granted chat, back before the gateway monitored it, if it holds `history:read`. | Read the history of any chat outside its grant. |
 | Download photos and files from messages in granted chats, if it holds `media:read`. | Download a file that belongs to a chat outside its grant, even with the file's id. |
 | Learn the titles, usernames and member counts of its granted chats, if it holds `chats:read`. | List the user's chats, or find out whether a chat it was not granted exists. |
@@ -88,10 +88,10 @@ data; the chat set determines from which chats. Both apply to every request.
 
 | Scope | Shown to the user as | Allows | Endpoints and events |
 |---|---|---|---|
-| `messages:read` | New messages | Receiving messages as they arrive, and reading the stored backlog. | `message.new`, `message.edited` and `message.deleted` events, from `GET /v1/events`, the WebSocket and webhooks. |
+| `messages:read` | New messages | Receiving messages as they arrive, and reading the stored backlog. | `message.new`, `message.edited`, `message.deleted`, `message.reactions` and `poll.updated` events, from `GET /v1/events`, the WebSocket and webhooks. |
 | `history:read` | Past messages | Reading a chat's timeline from Telegram, back before the gateway monitored it. | `GET /v1/chats/{chat_id}/messages` |
 | `media:read` | Photos and files | Downloading the files attached to messages, and chat photos. Without it, messages still describe their media (kind, size, file name); only the bytes are withheld. | `GET /v1/media/{media_id}` |
-| `chats:read` | Chat names and details | Listing the granted chats with title, username and member count, and learning when coverage changes. | `GET /v1/chats`, and the `chat.updated`, `monitoring.started` and `monitoring.stopped` events. |
+| `chats:read` | Chat names and details | Listing granted chats with title, username, member count, read state, position and mute state, and learning when coverage changes. | `GET /v1/chats`, and the `chat.updated`, `chat.read`, `chat.position`, `monitoring.started` and `monitoring.stopped` events. |
 | `messages:send` | Send messages | Sending plain text messages **as the user** to the granted chats, optionally as a reply. Everyone in the chat sees them as written by the user. The only scope that acts on the account rather than reading from it. | `POST /v1/chats/{chat_id}/messages` |
 
 `GET /v1/me` and the endpoints under `/v1/me/webhook` need no particular scope: any valid app

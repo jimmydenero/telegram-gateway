@@ -7,6 +7,10 @@ import TDLibClient
 /// (docs/architecture.md "Delivery guarantees"). Never calls `viewMessages` or `openChat`.
 public actor Monitor {
     public static let memberCountCoalesce: TimeInterval = 5 * 60
+    /// At most one `chat.read` per chat per second (docs/events.md "chat.read").
+    public static let readCoalesce: TimeInterval = 1
+    /// At most one `chat.position` per chat per `00:10` when only the order changed.
+    public static let orderCoalesce: TimeInterval = 10
 
     public struct BackfillStatus: Sendable, Equatable {
         public var inProgress: Bool
@@ -34,6 +38,16 @@ public actor Monitor {
     /// that arrives before the backfill runs advances the cursor past messages we never saw;
     /// the backfill starts from this snapshot instead.
     private var gapCursors: [Int64: Int64] = [:]
+
+    /// Coalescing of `chat.read` and `chat.position`: when each was last emitted per chat, the
+    /// state it carried, and the trailing emission waiting for its interval to pass.
+    private enum Coalesced: Hashable {
+        case read(Int64)
+        case position(Int64)
+    }
+    private var emittedAt: [Coalesced: Date] = [:]
+    private var emittedState: [Coalesced: ChatState] = [:]
+    private var pendingEmits: [Coalesced: Task<Void, Never>] = [:]
 
     public init(
         store: Store, eventLog: EventLog, translator: Translator, tdlib: any TDLibRequesting,
@@ -118,6 +132,22 @@ public actor Monitor {
             try await store.upsertFolder(folder, now: clock.now)
             try await reconcileMonitored()
 
+        case .chatState(let chatId, let state):
+            guard monitored[chatId] != nil else { return }
+            try await applyState(chatId, state)
+
+        case .messageReactions(let chatId, let messageId, let reactions):
+            guard monitored[chatId] != nil else { return }
+            let now = clock.now
+            let chat = try await summary(chatId)
+            try await eventLog.append(Event(type: .messageReactions, occurredAt: now, recordedAt: now, chat: chat, payload: .reactions(messageId: messageId, reactions)))
+
+        case .pollUpdated(let chatId, let messageId, let poll):
+            guard monitored[chatId] != nil else { return }
+            let now = clock.now
+            let chat = try await summary(chatId)
+            try await eventLog.append(Event(type: .pollUpdated, occurredAt: now, recordedAt: now, chat: chat, payload: .poll(messageId: messageId, poll)))
+
         case .connectionState(let state):
             let previous = connectionState
             connectionState = state
@@ -168,6 +198,89 @@ public actor Monitor {
         }
         if changes.contains("member_count") { try await store.setMemberCountEventAt(chatId: chatId, now) }
         try await eventLog.append(Event(type: .chatUpdated, occurredAt: now, recordedAt: now, chat: fresh.summary, payload: .chat(fresh, changes: changes)))
+    }
+
+    // MARK: Read state and position
+
+    /// Records a monitored chat's new state and emits what changed: `chat.read`,
+    /// `chat.position`, or `chat.updated` for `is_muted`. The first state recorded for a chat
+    /// is a baseline and emits nothing.
+    private func applyState(_ chatId: Int64, _ state: ChatState) async throws {
+        guard var chat = try await store.chat(chatId) else { return }
+        let previous = chat.state
+        guard previous != state else { return }
+        try await store.setChatState(chatId: chatId, state)
+        guard let previous else { return }
+        if !previous.sameRead(as: state) {
+            try await coalesce(.read(chatId), interval: Monitor.readCoalesce, immediate: false)
+        }
+        if !previous.samePosition(as: state) {
+            // Pinning, unpinning, archiving and unarchiving are emitted at once; the order alone
+            // changes with every message, so it is coalesced.
+            let moved = previous.isPinned != state.isPinned || previous.isArchived != state.isArchived
+            try await coalesce(.position(chatId), interval: Monitor.orderCoalesce, immediate: moved)
+        }
+        if previous.isMuted != state.isMuted {
+            chat.state = state
+            let now = clock.now
+            try await eventLog.append(Event(type: .chatUpdated, occurredAt: now, recordedAt: now, chat: chat.summary, payload: .chat(chat, changes: ["is_muted"])))
+        }
+    }
+
+    /// Emits now if the interval since the last emission has passed (or `immediate`),
+    /// otherwise once it has, with the state as it is then.
+    private func coalesce(_ key: Coalesced, interval: TimeInterval, immediate: Bool) async throws {
+        let now = clock.now
+        if immediate || emittedAt[key].map({ now.timeIntervalSince($0) >= interval }) ?? true {
+            try await emitState(key)
+            return
+        }
+        guard pendingEmits[key] == nil else { return }
+        pendingEmits[key] = Task { [weak self] in
+            await self?.emitWhenDue(key, interval: interval)
+        }
+    }
+
+    private func emitWhenDue(_ key: Coalesced, interval: TimeInterval) async {
+        while let last = emittedAt[key] {
+            let wait = interval - clock.now.timeIntervalSince(last)
+            guard wait > 0 else { break }
+            do {
+                try await clock.sleep(for: .milliseconds(Int64((wait * 1000).rounded(.up))))
+            } catch {
+                return // cancelled by whoever removed it from `pendingEmits`
+            }
+        }
+        pendingEmits[key] = nil
+        do {
+            try await emitState(key)
+        } catch {
+            logger.error("coalesced \(key) failed: \(error)")
+        }
+    }
+
+    /// Appends `chat.read` or `chat.position` with the chat's recorded state, unless it equals
+    /// what was last emitted (a change that was undone within the interval).
+    private func emitState(_ key: Coalesced) async throws {
+        let chatId: Int64, type: EventType
+        switch key {
+        case .read(let id): (chatId, type) = (id, .chatRead)
+        case .position(let id): (chatId, type) = (id, .chatPosition)
+        }
+        guard monitored[chatId] != nil, let chat = try await store.chat(chatId), let state = chat.state else { return }
+        if let last = emittedState[key] {
+            let same = type == .chatRead ? last.sameRead(as: state) : last.samePosition(as: state)
+            if same { return }
+        }
+        let now = clock.now
+        emittedAt[key] = now
+        emittedState[key] = state
+        try await eventLog.append(Event(type: type, occurredAt: now, recordedAt: now, chat: chat.summary, payload: .chatState(state)))
+    }
+
+    /// Waits for coalesced emissions that are due (tests: after advancing the clock).
+    public func waitForCoalesced() async {
+        for task in pendingEmits.values { await task.value }
     }
 
     private func summary(_ chatId: Int64) async throws -> ChatSummary {
@@ -239,6 +352,11 @@ public actor Monitor {
             let chat = try await summary(chatId)
             try await store.deleteCursor(chatId: chatId)
             gapCursors.removeValue(forKey: chatId)
+            for key in [Coalesced.read(chatId), .position(chatId)] {
+                pendingEmits.removeValue(forKey: key)?.cancel()
+                emittedAt.removeValue(forKey: key)
+                emittedState.removeValue(forKey: key)
+            }
             try await eventLog.append(Event(type: .monitoringStopped, occurredAt: now, recordedAt: now, chat: chat, payload: .monitoring(info)))
         }
         for chatId in current.keys.sorted() where previous[chatId] == nil {
@@ -247,6 +365,8 @@ public actor Monitor {
             do {
                 chat = try await translator.chatInfo(chatId)
                 try await store.upsertChat(chat, now: now)
+                // The baseline later updates are compared with.
+                if let state = chat.state { try await store.setChatState(chatId: chatId, state) }
             } catch {
                 logger.warning("chat \(chatId) entered the monitored set but cannot be read: \(error)")
                 chat = try await store.chat(chatId) ?? ChatInfo(id: chatId, type: chatId > 0 ? .private : .supergroup, title: "", username: nil, memberCount: nil, photo: nil)

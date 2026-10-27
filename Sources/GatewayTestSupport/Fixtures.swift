@@ -167,13 +167,147 @@ public enum Fixtures {
         ["@type": "messagePoll", "poll": ["@type": "poll", "id": "77", "question": formattedText("Which?"), "options": []]]
     }
 
+    /// A poll as TDLib reports it: `options` are (text, voter count, chosen by the user).
+    public static func pollContent(
+        question: String, options: [(String, Int, Bool)], isClosed: Bool = false, isAnonymous: Bool = true, quiz: Bool = false
+    ) -> JSONObject {
+        let optionObjects: [JSONObject] = options.enumerated().map { index, option in
+            [
+                "@type": "pollOption", "id": String(index), "text": formattedText(option.0), "voter_count": option.1,
+                "vote_percentage": 0, "recent_voter_ids": [], "is_chosen": option.2, "is_being_chosen": false, "addition_date": 0,
+            ]
+        }
+        let type: JSONObject = quiz
+            ? ["@type": "pollTypeQuiz", "correct_option_ids": [0], "explanation": formattedText("")]
+            : ["@type": "pollTypeRegular"]
+        return [
+            "@type": "messagePoll",
+            "poll": [
+                "@type": "poll", "id": "78", "question": formattedText(question), "options": optionObjects,
+                "total_voter_count": options.reduce(0) { $0 + $1.1 }, "recent_voter_ids": [], "is_anonymous": isAnonymous,
+                "allows_multiple_answers": false, "allows_revoting": true, "type": type, "open_period": 0, "close_date": 0, "is_closed": isClosed,
+            ],
+            "description": formattedText(""), "can_add_option": false,
+        ]
+    }
+
+    /// Service message contents (joins, leaves, title changes, pins, calls).
+    public static func serviceContent(_ type: String, _ fields: JSONObject = [:]) -> JSONObject {
+        var object = fields
+        object["@type"] = type
+        return object
+    }
+
+    public static func callContent(isVideo: Bool = false, discardReason: String, duration: Int) -> JSONObject {
+        ["@type": "messageCall", "unique_id": "1", "is_video": isVideo, "discard_reason": ["@type": discardReason], "duration": duration]
+    }
+
+    // MARK: Reactions
+
+    /// A `messageInteractionInfo`. Each reaction is (emoji or nil, custom emoji id or nil,
+    /// total count, chosen by the user); `paid` adds a Telegram Star reaction.
+    public static func interactionInfo(reactions: [(String?, String?, Int, Bool)], viewCount: Int = 0, paid: Int = 0) -> JSONObject {
+        var list: [JSONObject] = reactions.map { emoji, customId, count, chosen in
+            let type: JSONObject = emoji.map { ["@type": "reactionTypeEmoji", "emoji": $0] }
+                ?? ["@type": "reactionTypeCustomEmoji", "custom_emoji_id": customId ?? "0"]
+            return ["@type": "messageReaction", "type": type, "total_count": count, "is_chosen": chosen, "recent_sender_ids": []]
+        }
+        if paid > 0 {
+            list.append(["@type": "messageReaction", "type": ["@type": "reactionTypePaid"], "total_count": paid, "is_chosen": false, "recent_sender_ids": []])
+        }
+        return [
+            "@type": "messageInteractionInfo", "view_count": viewCount, "forward_count": 0,
+            "reactions": ["@type": "messageReactions", "reactions": list, "are_tags": false, "paid_reactors": [], "can_get_added_reactions": false],
+        ]
+    }
+
+    public static func updateMessageInteractionInfo(chatId: Int64, id: Int64, info: JSONObject) -> JSONBox {
+        JSONBox(["@type": "updateMessageInteractionInfo", "chat_id": chatId, "message_id": MessageId.toInternal(id), "interaction_info": info])
+    }
+
+    // MARK: Read state and positions
+
+    /// A `chatPosition`. `list` is `chatListMain`, `chatListArchive` or a folder id.
+    public static func chatPosition(list: String = "chatListMain", folderId: Int64? = nil, order: String, isPinned: Bool = false) -> JSONObject {
+        var listObject: JSONObject = ["@type": list]
+        if let folderId { listObject = ["@type": "chatListFolder", "chat_folder_id": Int(folderId)] }
+        return ["@type": "chatPosition", "list": listObject, "order": order, "is_pinned": isPinned]
+    }
+
+    /// Adds TDLib's read state, positions and notification settings to a `chat` object.
+    /// Message ids are public; the fixture shifts them into TDLib's form.
+    public static func withState(
+        _ chat: JSONBox, unread: Int = 0, mentions: Int = 0, lastReadInbox: Int64 = 0, lastReadOutbox: Int64 = 0,
+        positions: [JSONObject] = [], useDefaultMute: Bool = true, muteFor: Int = 0
+    ) -> JSONBox {
+        var object = chat.object
+        object["unread_count"] = unread
+        object["unread_mention_count"] = mentions
+        object["last_read_inbox_message_id"] = MessageId.toInternal(lastReadInbox)
+        object["last_read_outbox_message_id"] = MessageId.toInternal(lastReadOutbox)
+        object["is_marked_as_unread"] = false
+        object["positions"] = positions
+        object["notification_settings"] = notificationSettings(useDefaultMute: useDefaultMute, muteFor: muteFor)
+        return JSONBox(object)
+    }
+
+    public static func notificationSettings(useDefaultMute: Bool, muteFor: Int) -> JSONObject {
+        ["@type": "chatNotificationSettings", "use_default_mute_for": useDefaultMute, "mute_for": muteFor, "use_default_sound": true, "use_default_show_preview": true]
+    }
+
+    public static func updateNewChat(_ chat: JSONBox) -> JSONBox {
+        JSONBox(["@type": "updateNewChat", "chat": chat.object])
+    }
+
+    public static func updateChatReadInbox(chatId: Int64, lastRead: Int64, unread: Int) -> JSONBox {
+        JSONBox(["@type": "updateChatReadInbox", "chat_id": chatId, "last_read_inbox_message_id": MessageId.toInternal(lastRead), "unread_count": unread])
+    }
+
+    public static func updateChatReadOutbox(chatId: Int64, lastRead: Int64) -> JSONBox {
+        JSONBox(["@type": "updateChatReadOutbox", "chat_id": chatId, "last_read_outbox_message_id": MessageId.toInternal(lastRead)])
+    }
+
+    public static func updateChatUnreadMentionCount(chatId: Int64, count: Int) -> JSONBox {
+        JSONBox(["@type": "updateChatUnreadMentionCount", "chat_id": chatId, "unread_mention_count": count])
+    }
+
+    public static func updateMessageMentionRead(chatId: Int64, id: Int64, count: Int) -> JSONBox {
+        JSONBox(["@type": "updateMessageMentionRead", "chat_id": chatId, "message_id": MessageId.toInternal(id), "unread_mention_count": count])
+    }
+
+    public static func updateChatIsMarkedAsUnread(chatId: Int64, _ marked: Bool) -> JSONBox {
+        JSONBox(["@type": "updateChatIsMarkedAsUnread", "chat_id": chatId, "is_marked_as_unread": marked])
+    }
+
+    public static func updateChatPosition(chatId: Int64, _ position: JSONObject) -> JSONBox {
+        JSONBox(["@type": "updateChatPosition", "chat_id": chatId, "position": position])
+    }
+
+    /// `updateChatLastMessage` carries the chat's full set of positions.
+    public static func updateChatDraftMessage(chatId: Int64, positions: [JSONObject]) -> JSONBox {
+        JSONBox(["@type": "updateChatDraftMessage", "chat_id": chatId, "positions": positions])
+    }
+
+    public static func updateChatLastMessage(chatId: Int64, positions: [JSONObject]) -> JSONBox {
+        JSONBox(["@type": "updateChatLastMessage", "chat_id": chatId, "positions": positions])
+    }
+
+    public static func updateChatNotificationSettings(chatId: Int64, useDefaultMute: Bool, muteFor: Int) -> JSONBox {
+        JSONBox(["@type": "updateChatNotificationSettings", "chat_id": chatId, "notification_settings": notificationSettings(useDefaultMute: useDefaultMute, muteFor: muteFor)])
+    }
+
+    /// `scope` is `notificationSettingsScopePrivateChats`, `…GroupChats` or `…ChannelChats`.
+    public static func updateScopeNotificationSettings(scope: String, muteFor: Int) -> JSONBox {
+        JSONBox(["@type": "updateScopeNotificationSettings", "scope": ["@type": scope], "notification_settings": ["@type": "scopeNotificationSettings", "mute_for": muteFor, "show_preview": true]])
+    }
+
     // MARK: Messages
 
     /// A `message` object. `id` is the public id; the fixture shifts it into TDLib's form.
     public static func message(
         chatId: Int64, id: Int64, sender: JSONObject, date: Int = 1_790_000_000, editDate: Int = 0, isOutgoing: Bool = false,
         content: JSONObject, replyTo: (chatId: Int64, messageId: Int64)? = nil, forward: JSONObject? = nil, albumId: String = "0",
-        sendingState: JSONObject? = nil
+        sendingState: JSONObject? = nil, interactionInfo: JSONObject? = nil, topic: JSONObject? = nil
     ) -> JSONBox {
         var object: JSONObject = [
             "@type": "message", "id": MessageId.toInternal(id), "sender_id": sender, "chat_id": chatId,
@@ -185,8 +319,14 @@ public enum Fixtures {
         }
         if let forward { object["forward_info"] = forward }
         if let sendingState { object["sending_state"] = sendingState }
+        if let interactionInfo { object["interaction_info"] = interactionInfo }
+        if let topic { object["topic_id"] = topic }
         return JSONBox(object)
     }
+
+    /// `message.topic_id` for a forum topic, and for a reply thread (which is not a topic).
+    public static func forumTopic(_ id: Int) -> JSONObject { ["@type": "messageTopicForum", "forum_topic_id": id] }
+    public static func threadTopic(_ id: Int64) -> JSONObject { ["@type": "messageTopicThread", "message_thread_id": MessageId.toInternal(id)] }
 
     public static func userSender(_ id: Int64) -> JSONObject { ["@type": "messageSenderUser", "user_id": id] }
     public static func chatSender(_ id: Int64) -> JSONObject { ["@type": "messageSenderChat", "chat_id": id] }

@@ -540,6 +540,15 @@ new events only, and earlier ones are read with `GET /v1/events`.
   "username": "acmeupdates",
   "member_count": 12840,
   "is_monitored": true,
+  "unread_count": 3,
+  "unread_mention_count": 0,
+  "last_read_inbox_message_id": "408",
+  "last_read_outbox_message_id": null,
+  "is_marked_as_unread": false,
+  "is_pinned": true,
+  "order": "9221294780217032704",
+  "is_archived": false,
+  "is_muted": false,
   "photo": { "media_id": "med_3fK9…", "width": 640, "height": 640 }
 }
 ```
@@ -551,6 +560,21 @@ new events only, and earlier ones are read with `GET /v1/events`.
 | `member_count` | `null` when Telegram does not report it: private chats, and channels whose count the account cannot read. |
 | `is_monitored` | Whether the gateway currently watches this chat. For an app this is `false` only for a granted chat that the user has since stopped monitoring. The chat stays in the app's list so the app knows it lost coverage. |
 | `photo` | The chat's profile photo as a reduced [media object](events.md#media-object), fetchable with `media:read`. `null` if the chat has none. |
+| `unread_count` | Integer count of unread incoming messages. |
+| `unread_mention_count` | Integer count of unread mentions. |
+| `last_read_inbox_message_id` | Public message id as a string, or `null` if no incoming message has been read. |
+| `last_read_outbox_message_id` | Public message id as a string, or `null` if no outgoing message has been read by the recipient. |
+| `is_marked_as_unread` | Boolean manual unread marker, independent of the counts. |
+| `is_pinned` | Boolean; pinned in the main chat list. Archive and folder pins are not represented. |
+| `order` | Main-list position as a decimal string; higher comes first, `"0"` means absent from the main list. |
+| `is_archived` | Boolean; present in the archive list. |
+| `is_muted` | Boolean; chat notifications muted, including inherited notification-scope settings. |
+
+All chat endpoints (including `/v1/admin/chats`) return these fields. Older cached chats
+can carry `null` until TDLib supplies state. Read ids use the public message-id convention.
+Clients sort main-list chats numerically by `order` descending; array order on the monitored
+and granted lists is not a Telegram ordering guarantee. See [chat events](events.md#chatread-and-chatposition)
+for live changes and coalescing.
 
 ### `GET /v1/chats`
 
@@ -569,7 +593,10 @@ Requires `chats:read`. Returns the chats in the grant (list or folder), each wit
 `GET /v1/admin/chats?all=true&limit=200&cursor=…` returns every chat in the account's main
 chat list, in Telegram's order (most recent activity first), paginated with `next_cursor`
 (an opaque string). `limit` is 1–500, default 200. Secret chats are omitted. The full list
-needs a signed-in gateway (`503 not_logged_in` otherwise).
+needs a signed-in gateway (`503 not_logged_in` otherwise). Add `list=archive` to discover
+archived chats in Telegram’s archive order; the default is `list=main`. Paginate each list
+separately. The `order` field still describes only the main list (so is `"0"` for an
+archived-only chat). This does not automatically monitor or grant any chat.
 
 ```json
 { "chats": [ … ], "has_more": true, "next_cursor": "c_MTcyNzYxNDU4Nw" }
