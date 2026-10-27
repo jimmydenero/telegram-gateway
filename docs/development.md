@@ -586,3 +586,29 @@ Notes for working on the code:
   does.
 - Changing a dylib's install name invalidates its signature, and Apple silicon refuses
   unsigned code; `build.sh` signs it again.
+
+### Owner action commands
+
+`tgw` acts on the account through the running gateway's API, with the admin token, like
+`tgw send`. Every command shows what it will do and asks first unless given `--yes`. None
+of them loads TDLib. While developing, run them only against your own gateway (its own
+`TGW_HOME` and `TGW_PORT`, without Telegram credentials), never the one signed in to your
+account: they then stop at `403 chat_not_granted` or `503 not_logged_in`, and the tests
+cover the rest with `FakeTDLib`.
+
+```sh
+tgw send <chat> [caption] --file <path> [--kind photo] [--mime-type image/jpeg] [--silent]
+tgw forward <to-chat> <from-chat> <message> [message ...] [--send-copy]
+tgw edit <chat> <message> 'Corrected text'
+tgw delete <chat> <message> [message ...] [--for-everyone]
+tgw react <chat> <message> '👍' [--remove] [--custom] [--big]
+tgw vote <chat> <message> [option ...]        # options count from 0; none takes the vote back
+tgw chat pin <chat> [--undo]
+tgw chat archive <chat> [--undo]
+tgw chat mute <chat> [--for 8:00:00] [--undo]
+tgw chat start <username> [--phone]
+```
+
+`send --file` sends a document unless `--kind` says otherwise, and guesses the MIME type
+from the file name unless `--mime-type` gives it. `--custom` reads the reaction as a custom
+emoji id. `--for` takes `mm:ss` or `h:mm:ss`.

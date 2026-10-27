@@ -177,7 +177,10 @@ enum LinkFrames {
             }
         }
         var body: Data?
-        if let raw = frame["body"], raw != .null { body = raw.serialized() }
+        if let raw = frame["body"], raw != .null {
+            body = raw.serialized()
+            if (body?.count ?? 0) > ActionInput.maxUploadBodyBytes { return .failure(APIError.payloadTooLarge) }
+        }
         return .success(LinkHTTPRequest(method: method, path: path, query: query, body: body))
     }
 }

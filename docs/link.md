@@ -292,3 +292,19 @@ The existing request and event frames carry the additive chat/message fields and
 [events.md](events.md). There is no link protocol change. Consumers must accept new event
 types and fields, retain decimal order strings without floating-point conversion, and
 apply reaction/poll replacements. Linked text remains `text_link` for version-1 compatibility.
+
+## Actions over the link
+
+Volgenic carries out the [message and chat actions](api.md#message-and-chat-actions) with
+ordinary `request` frames: the HTTP method and path, and the JSON `body`, which `DELETE`
+requests also carry. Over the link they run with the admin token's authority, so they work
+in any monitored chat, and a chat started with `POST /v1/chats` joins the monitored set.
+There is no new frame type.
+
+The 20 MiB limit for a file applies to the file itself, before base64, as on HTTP: the
+`body` of a send with a file may be up to 28,027,564 bytes (the base64 of 20 MiB plus
+64 KiB for the rest), and the gateway accepts WebSocket messages up to 64 KiB larger than
+that for the frame around it. Response bodies keep their 20 MiB limit.
+
+The results come back through the `subscribe` stream as the ordinary events, once each.
+None of this has been run against a real Volgenic server or a live account.

@@ -560,3 +560,16 @@ including events recorded after version 2 exists, for as long as version 1 is su
 deprecation is announced in this file with a date at least 90 days ahead. Events recorded
 under version 1 stay readable under version 2, because the gateway renders events from
 stored data rather than from stored JSON.
+
+## Events from the gateway's own actions
+
+When an app or the owner acts through the gateway ([api.md](api.md#message-and-chat-actions)),
+no new kind of event appears and the action's response adds nothing to the log. The change
+comes back from Telegram like a change made on the user's phone, and becomes the ordinary
+event, once: `message.new` for a sent or forwarded message (after Telegram confirms it),
+`message.edited`, `message.deleted`, `message.reactions`, `poll.updated`, and
+`chat.position` or `chat.updated` for pinning, archiving and muting. Telegram sometimes
+reports a deletion twice; the gateway records it once.
+
+The [entities](#entities) in this document are also what an app sends to format text, with
+the same UTF-16 offsets. `pre` may carry a `language`, as a string or `null`.

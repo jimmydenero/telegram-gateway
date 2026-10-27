@@ -234,11 +234,12 @@ struct AppDetailPane: View {
                             }
                         }
                     }
-                    if grant.scopes.contains(Permission.send) {
-                        LabeledSection("Can send") {
+                    if !grant.scopes.filter({ Permission.actions.contains($0) }).isEmpty {
+                        LabeledSection("Can act as you") {
                             RowCard {
-                                TitleAndDetail(title: Permission.name(Permission.send), detail: Permission.meaning(Permission.send))
-                                    .help(Permission.send)
+                                ForEach(Permission.actions.filter { grant.scopes.contains($0) }, id: \.self) { scope in
+                                    TitleAndDetail(title: Permission.name(scope), detail: Permission.meaning(scope)).help(scope)
+                                }
                             }
                         }
                     }
@@ -362,10 +363,10 @@ struct ApproveSheet: View {
                                 }
                             }
                         }
-                        if draft.request.scopes.contains(Permission.send) {
-                            LabeledSection("Can send") {
+                        if !draft.request.scopes.filter({ Permission.actions.contains($0) }).isEmpty {
+                            LabeledSection("Can act as you") {
                                 RowCard(inset: 26) {
-                                    scopeToggle(Permission.send)
+                                    ForEach(Permission.actions.filter { draft.request.scopes.contains($0) }, id: \.self) { scope in scopeToggle(scope) }
                                 }
                             }
                         }

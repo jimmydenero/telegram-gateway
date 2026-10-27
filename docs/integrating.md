@@ -560,10 +560,10 @@ Your integration is correct when:
 
 | You cannot | Because |
 |---|---|
-| Send media or formatted text, mark messages as read, or act on the account in other ways | The only action is sending a plain text message, with `messages:send` ([api.md](api.md#sending-messages)). |
+| Mark messages as read, show "typing…", join or leave groups and channels, or edit or delete other people's messages | The gateway does none of these. What an app can do as the user is listed in [api.md](api.md#message-and-chat-actions): send text and files, forward, edit and delete the user's own messages, react and vote with `messages:send`, and pin, archive, mute and start chats with `chats:manage`. |
 | Open the WebSocket, or call history and media endpoints, from another machine | The API listens on `127.0.0.1` only. Apps elsewhere receive events through a webhook. |
 | Call the API from a web page | The gateway sends no CORS headers, and browsers cannot set the `Authorization` header on a WebSocket. |
-| Receive reactions, view counts, poll contents or text formatting | They are not in the event format ([events.md](events.md#not-supported)). |
+| Receive view counts | They are not in the event format ([events.md](events.md#not-supported)). |
 | Change your grant's scopes or chats | The user revokes it, and you request access again. |
 
 The complete list is in [api.md](api.md#not-supported).
