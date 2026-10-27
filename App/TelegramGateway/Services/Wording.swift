@@ -16,7 +16,7 @@ enum Tone: Equatable, Sendable {
 /// A **scope** (docs/grants.md) in plain words. The identifier appears only as a tooltip.
 enum Permission {
     /// Canonical display order, whatever order the API returned.
-    static let order = ["messages:read", "history:read", "media:read", "chats:read", "messages:send"]
+    static let order = ["messages:read", "history:read", "media:read", "chats:read", "messages:send", "chats:manage"]
 
     /// "New messages"
     static func name(_ scope: String) -> String {
@@ -25,7 +25,8 @@ enum Permission {
         case "history:read": "Past messages"
         case "media:read": "Photos and files"
         case "chats:read": "Chat names and details"
-        case "messages:send": "Send messages"
+        case "messages:send": "Send and react"
+        case "chats:manage": "Manage chats"
         default: scope
         }
     }
@@ -37,7 +38,8 @@ enum Permission {
         case "history:read": "Messages from before the app was connected"
         case "media:read": "Download what is attached to those messages"
         case "chats:read": "Titles, usernames and member counts"
-        case "messages:send": "Sends messages as you in these chats; people see them as written by you"
+        case "messages:send": "Sends messages and files as you, forwards, edits and deletes what you sent, reacts and votes; people see it as you"
+        case "chats:manage": "Pins, archives and mutes these chats, and finds chats by username or phone number"
         default: "Not known to this version of the app"
         }
     }
@@ -50,13 +52,13 @@ enum Permission {
         }
     }
 
-    /// The one permission that acts as the user instead of reading. Shown apart, under
-    /// "Can send", so it is never mistaken for one more kind of reading.
-    static let send = "messages:send"
+    /// The permissions that act as the user instead of reading. Shown apart, under
+    /// "Can act as you", so they are never mistaken for more kinds of reading.
+    static let actions = ["messages:send", "chats:manage"]
 
     /// The reading permissions among `scopes`, in display order.
     static func reading(_ scopes: [String]) -> [String] {
-        sorted(scopes.filter { $0 != send })
+        sorted(scopes.filter { !actions.contains($0) })
     }
 
     static func sorted(_ scopes: [String]) -> [String] {
