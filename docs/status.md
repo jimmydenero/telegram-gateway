@@ -36,6 +36,9 @@ limitations below should inform deployment decisions.
   and revoke, follow the event stream, and act as yourself: `tgw send` (also with
   `--file`), `tgw forward`, `tgw edit`, `tgw delete`, `tgw react`, `tgw vote` and
   `tgw chat pin|archive|mute|start`, each asking first unless `--yes`.
+- **Marking as read**, new: `POST /v1/chats/{chat_id}/read` with `messages:mark_read`, and
+  `tgw read`, through `MessageReader`, the one caller of `viewMessages`. Tested with the
+  scripted stand-in for TDLib only; see below.
 - **Links to Volgenic** ([link.md](link.md)), new: `tgw link add/list/remove`, the outbound
   WebSocket with `hello`, requests run through the admin API in process, `subscribe` with
   backlog, live events and `gap`, `auth_state` pushes, reconnecting with backoff, and the stop
@@ -76,6 +79,11 @@ built from that schema. The following behavior still requires live-account verif
   waveform when they are not given; whether uploads of 20 MiB finish within `30s`;
   whether `searchUserByPhoneNumber` finds people who are not contacts; and that reacting
   and voting work on a chat that is not open, without marking it read.
+- **Marking as read**, which is new: that `viewMessages` with `force_read` marks a closed
+  chat read without `openChat`; that the senders see read receipts and the user's other
+  devices clear the badge; that one `chat.read` results; whether `readAllChatMentions`
+  clears mentions as the tests assume; and whether a read makes Telegram show the account
+  as recently online to others.
 - **The link to Volgenic**, which is new. It has not been run against a real Volgenic server
   or with a signed-in account: not the TLS connection to `wss://volgenic.com`, Volgenic's
   `401` and `4401`, its pings, a sign-in driven from Volgenic, media of several megabytes in

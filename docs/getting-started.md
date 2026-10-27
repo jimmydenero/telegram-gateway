@@ -57,8 +57,9 @@ You need:
 The gateway connects through a Telegram user account rather than a bot. It can access the
 chats available to that account. It only ever stores and passes on messages from chats
 you tick, and only to apps you approve. It sends, forwards, edits, deletes or reacts only when you
-do (with `tgw`) or when an app you allowed to does, and only in chats you tick. It never marks anything as
-read, and never shows you as online. Telegram's
+do (with `tgw`) or when an app you allowed to does, and only in chats you tick. It marks a chat read only when you
+read it, through `tgw read` or an app you allowed to (the senders then see read receipts),
+and it never shows you as online. Telegram's
 [terms of service](https://core.telegram.org/api/terms) apply to what you do with it.
 
 ## 2. Get your Telegram API key

@@ -249,7 +249,10 @@ alone are coalesced to at most one `chat.updated` per chat per `05:00`.
 
 Both carry the current [chat summary](#chat-summary). `chat.read` reports incoming read
 progress (including reading on another device), outgoing read receipts, unread mentions,
-and the manual unread flag. It observes state only; it never marks messages read.
+and the manual unread flag. It reports reads made anywhere: in the user's Telegram apps,
+and through the gateway itself when an app or the owner marks a chat read
+([api.md](api.md#marking-as-read)); the gateway's own read arrives as one ordinary
+`chat.read`, like any other.
 The first change emits immediately; changes within the next second emit once at the end
 of that interval with the latest state. A change undone during the interval emits nothing.
 

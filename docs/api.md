@@ -32,6 +32,7 @@ in seconds, for example `10s`.
 - [History](#history)
 - [Sending messages](#sending-messages)
 - [Message and chat actions](#message-and-chat-actions): forward, edit, delete, react, vote, chat settings, new chats
+- [Marking as read](#marking-as-read): when a person read a chat
 - [Media](#media)
 - [Webhooks](#webhooks)
 - [Health](#health)
@@ -303,7 +304,7 @@ Request:
 |---|---|---|
 | `name` | yes | 1–64 characters. Shown to the user. |
 | `description` | yes | 1–280 characters. Shown to the user: say what the app does with the messages. |
-| `scopes` | yes | Non-empty array of scope names from [grants.md](grants.md#scopes). Ask for `messages:send` only if the app sends messages: the user sees that the app may send messages as them. |
+| `scopes` | yes | Non-empty array of scope names from [grants.md](grants.md#scopes). Ask for `messages:send`, `chats:manage` or `messages:mark_read` only if the app acts on the account that way: the user sees that the app may act as them. |
 | `requested_chats` | no | An array of chat ids, or the string `"any"`. Default `"any"`. This is a suggestion: the user chooses the actual set. Requested chats that are not monitored are shown as such, and the user can start monitoring them as part of approving. |
 | `webhook` | no | `{ "url": "https://…" }`. `https` is required unless the host is `127.0.0.1`, `localhost` or `::1`. Omit it to use the WebSocket only; a webhook can be added later with `PUT /v1/me/webhook`. |
 
@@ -921,8 +922,8 @@ Telegram refuses an action the answer is `502 send_failed`, with Telegram's text
 `429 rate_limited` with Telegram's wait in `retry_after`. The gateway never retries an
 action on its own.
 
-No action marks a message as read, opens a chat, shows "typing…" or makes the account appear
-online. Reacting and voting work on a chat that is not open in the Telegram sense.
+No action marks a message as read (only [marking as read](#marking-as-read) does), opens a
+chat, shows "typing…" or makes the account appear online. Reacting and voting work on a chat that is not open in the Telegram sense.
 
 | Action | Method and path | Scope | Success |
 |---|---|---|---|
@@ -1068,6 +1069,59 @@ user, and gives Telegram its path. The file is deleted as soon as Telegram confi
 refuses the message. After a `504 send_timeout` it stays until Telegram's late answer, since
 the upload may still be under way. If the gateway stops before then, the next start deletes
 upload files older than `24:00:00` (24 hours).
+
+---
+
+## Marking as read
+
+`POST /v1/chats/{chat_id}/read` marks a chat's messages as read **as the user**, the way the
+Telegram app does when a person opens a chat. Use it when a person using your app has read
+the chat, and only then: Telegram then sends **read receipts** to the people who wrote the
+messages (the second tick in a private chat), and clears the unread badge on the user's
+other devices. It requires `messages:mark_read`, which an app holds only if it asked for it
+and the user approved it, and the chat must be in the grant's `effective_chat_ids` (for the
+admin token: monitored).
+
+```
+POST /v1/chats/-1001987654321/read
+Authorization: Bearer tgw_…
+Content-Type: application/json
+
+{ "up_to_message_id": "1530", "mentions": true }
+```
+
+| Field | Required | Rules |
+|---|---|---|
+| `up_to_message_id` | no | Marks the chat read up to and including this message, as a string. Without it, up to the newest message. |
+| `mentions` | no | `true` also clears the chat's unread mentions and replies to the user (`unread_mention_count`). Default `false`. |
+
+An empty body is allowed. Response `200` with the chat, in the format of
+[the chat object](#the-chat-object), with its new `unread_count`, `unread_mention_count` and
+`last_read_inbox_message_id`:
+
+```json
+{ "chat": { "id": "-1001987654321", "type": "supergroup", "title": "Acme Support", "unread_count": 0, "unread_mention_count": 0, "last_read_inbox_message_id": "1530", "…": "…" } }
+```
+
+The change also arrives in the event stream as an ordinary `chat.read`, once, like a read on
+the user's phone ([events.md](events.md#chatread-and-chatposition)).
+
+| Condition | Response |
+|---|---|
+| The grant lacks `messages:mark_read` | `403 insufficient_scope` |
+| The grant was revoked | `401 token_revoked` |
+| The chat is outside the grant, not monitored, or does not exist | `403 chat_not_granted` |
+| `up_to_message_id` not a message id string, `mentions` not a boolean | `400 invalid_request` with `details.field` |
+| More than 60 reads in a minute from this token | `429 rate_limited` |
+| Telegram asks the account to slow down (a flood wait) | `429 rate_limited`, with Telegram's wait in `retry_after` |
+| The gateway is not signed in, or the connection to Telegram is down | `503 not_logged_in`, `503 telegram_unavailable` |
+| Telegram refuses | `502 send_failed`, with Telegram's text in `details.reason` |
+
+**It never makes the account appear online.** The gateway does not open the chat in
+Telegram's sense (TDLib's `openChat`); it asks TDLib to mark the messages read in a closed
+chat (`viewMessages` with `force_read`). It never shows "typing…" and keeps the account
+offline. Whether Telegram, seeing the read, shows the account as recently online to others
+has not been verified against a live account ([status.md](status.md)).
 
 ---
 
@@ -1456,6 +1510,7 @@ Telegram) and the gateway's database.
 | All requests, per token | 600 per minute |
 | `GET /v1/chats/{chat_id}/messages` | 60 per minute |
 | `POST /v1/chats/{chat_id}/messages` and every [action](#message-and-chat-actions), together | 20 per minute |
+| `POST /v1/chats/{chat_id}/read` | 60 per minute |
 | `GET /v1/media/{media_id}`, uncached | 4 concurrent downloads per token |
 | `POST /v1/access-requests` | 10 per minute in total |
 | `GET /v1/access-requests/{id}` | 1 per 2s per request id |
@@ -1472,7 +1527,7 @@ per-token budget and carry neither header.
 
 | Not supported | What happens instead |
 |---|---|
-| Marking messages read, showing "typing…", joining or leaving groups and channels, appearing online | Not possible. |
+| Showing "typing…", joining or leaving groups and channels, appearing online | Not possible. Marking as read is possible only [on request](#marking-as-read), with `messages:mark_read`. |
 | Sending several files as one album, scheduling messages, sending into a forum topic | Not supported; each file is its own message. |
 | Editing or deleting other people's messages, even as a group admin | Not possible; only the account's own messages. |
 | Reaching the API from another machine | The gateway listens on `127.0.0.1` only. An app on another machine receives events through a [webhook](#webhooks); the WebSocket, history and media endpoints are reachable only from the Mac that runs the gateway. The one exception is a Volgenic server the user linked with `tgw link add`: the gateway dials it and carries its requests ([link.md](link.md)). |
@@ -1510,6 +1565,7 @@ per-token budget and carry neither header.
 | app | PUT, DELETE | `/v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | Add or remove the account's reaction |
 | app | POST | `/v1/chats/{chat_id}/messages/{message_id}/poll` | `messages:send` | Vote in a poll, or take the vote back |
 | app | PATCH | `/v1/chats/{chat_id}` | `chats:manage` | Pin, archive or mute a chat |
+| app | POST | `/v1/chats/{chat_id}/read` | `messages:mark_read` | Mark the chat read as the user |
 | app | POST | `/v1/chats` | `chats:manage` | Find a chat by username or phone number |
 | app | GET, HEAD | `/v1/media/{media_id}` | `media:read` | File bytes |
 | admin | GET | `/v1/admin/status` | | Full status |

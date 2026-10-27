@@ -638,6 +638,8 @@ public enum Scope: String, Codable, Sendable, CaseIterable, Comparable {
     /// Sending text messages as the user to the granted chats (`MessageSender`).
     case messagesSend = "messages:send"
     case chatsManage = "chats:manage"
+    /// Marking messages read as the user, when a person read them (`MessageReader`).
+    case messagesMarkRead = "messages:mark_read"
 
     public static func < (lhs: Scope, rhs: Scope) -> Bool { lhs.rawValue < rhs.rawValue }
 }
