@@ -284,3 +284,11 @@ a refused upgrade and the close code of a closed socket, and answers Volgenic's 
 itself. Requests run through `InProcessAPI` in `GatewayServer`, which hands each one to the
 gateway's own router with the admin token. Tests replace Volgenic with a WebSocket server on
 `127.0.0.1` inside the test process.
+
+## Mirror fields (format version 1)
+
+The existing request and event frames carry the additive chat/message fields and
+`chat.read`, `chat.position`, `message.reactions`, and `poll.updated` events documented in
+[events.md](events.md). There is no link protocol change. Consumers must accept new event
+types and fields, retain decimal order strings without floating-point conversion, and
+apply reaction/poll replacements. Linked text remains `text_link` for version-1 compatibility.

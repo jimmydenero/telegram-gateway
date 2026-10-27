@@ -205,22 +205,18 @@ struct AdminRoutes {
         let query = Query(request)
         let monitored = try await deps.store.effectiveMonitoredChatIds()
         guard query.bool("all") else {
-            let chats = try await deps.store.chats(monitored.sorted())
-            return json(["chats": .array(chats.map { $0.json(isMonitored: true) })])
+            var items: [JSONValue] = []
+            for chat in try await deps.store.chats(monitored.sorted()) {
+                items.append(await deps.live(chat).json(isMonitored: true))
+            }
+            return json(["chats": .array(items)])
         }
         let limit = try query.int("limit", default: 200, range: 1...500)
         let offset = query.string("cursor").flatMap(AdminRoutes.decodeCursor) ?? 0
-        let tdlib = try await deps.telegram.requireLive()
-        let mainList: JSONObject = ["@type": "chatListMain"]
-        for _ in 0..<100 {
-            do {
-                _ = try await tdlib.request("loadChats", ["chat_list": mainList, "limit": 100])
-            } catch let error as TDLibError where error.code == 404 {
-                break
-            }
-        }
-        let response = try await tdlib.request("getChats", ["chat_list": mainList, "limit": 10_000]).object
-        let ids = (response.array("chat_ids") ?? []).compactMap(Translator.int64)
+        _ = try await deps.telegram.requireLive()
+        let list = query.string("list") ?? "main"
+        guard list == "main" || list == "archive" else { throw APIError.invalidRequest("list", "must be main or archive") }
+        let ids = try await deps.translator.chatList(archived: list == "archive")
         let slice = ids.dropFirst(offset).prefix(limit)
         var items: [JSONValue] = []
         for id in slice {

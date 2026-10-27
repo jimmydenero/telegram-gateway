@@ -8,6 +8,11 @@ limitations below should inform deployment decisions.
 
 ## What works today
 
+- **Mirror fields**, new: read counts and receipts, manual unread markers, main-list pins
+  and order, archive/mute state, reactions, formatting, forum topic ids, polls and common
+  service-message text. Fake TDLib fixtures cover snapshots, updates, coalescing and API
+  scope filtering. These additions are unverified against a live account.
+
 - **Building from source**: TDLib at a pinned commit, the Swift package (`GatewayDaemon`,
   `tgw`), and the menu bar app. See [development.md](development.md) and [app.md](app.md).
 - **The gateway service**: runs in the foreground or as a LaunchAgent, keeps its data in one
@@ -79,8 +84,9 @@ reports it, next to the message's own timestamp.
 - Webhook signing secrets are stored unencrypted in the gateway's database, since the
   gateway signs with them. An approved app's token is stored unencrypted for the `10:00` in
   which the app may collect it.
-- Reactions, poll contents, read state, forum topics and secret chats are not part of the
-  event format.
+- Secret chats, archive/folder pin order and structured topic metadata
+  are not part of the event format. Mirroring still requires monitoring and granting chats;
+  these additions do not automatically expand access.
 - On the WebSocket, a bad token is reported with a close code after the upgrade, not with an
   HTTP `401`.
 - A locally built menu bar app may fail to register the gateway to start at login; macOS

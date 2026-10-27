@@ -63,7 +63,7 @@ import Testing
         #expect(error?.details["required"] == "history:read")
         #expect(error?.details["granted"] == ["messages:read"])
         try await core.grants.require(.historyRead, .admin)
-        #expect(await core.grants.visibleEventTypes(principal) == [.messageNew, .messageEdited, .messageDeleted])
+        #expect(await core.grants.visibleEventTypes(principal) == [.messageNew, .messageEdited, .messageDeleted, .messageReactions, .pollUpdated])
         #expect(await core.grants.visibleEventTypes(.admin) == nil)
         #expect(Grants.visibleEventTypes(scopes: [.mediaRead]).isEmpty)
     }

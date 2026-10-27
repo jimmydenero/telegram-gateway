@@ -30,6 +30,13 @@ public enum Translated: Sendable, Equatable {
     /// A chat entered or left a folder.
     case folderMembership(folderId: Int64, chatId: Int64, added: Bool)
     case connectionState(ConnectionState)
+    /// A chat's read state, list position or mute changed, or TDLib announced the chat. The
+    /// state after the update; the monitor compares it with what it recorded.
+    case chatState(chatId: Int64, ChatState)
+    /// A message's reactions changed. Public message id.
+    case messageReactions(chatId: Int64, messageId: Int64, [Reaction])
+    /// A poll's votes changed or it was closed. Public message id.
+    case pollUpdated(chatId: Int64, messageId: Int64, Poll)
 
     public static func == (lhs: Translated, rhs: Translated) -> Bool {
         switch (lhs, rhs) {
@@ -40,6 +47,9 @@ public enum Translated: Sendable, Equatable {
         case (.foldersChanged(let a), .foldersChanged(let b)): a.map(\.id) == b.map(\.id) && a.map(\.title) == b.map(\.title)
         case (.folderMembership(let f1, let c1, let a1), .folderMembership(let f2, let c2, let a2)): f1 == f2 && c1 == c2 && a1 == a2
         case (.connectionState(let a), .connectionState(let b)): a == b
+        case (.chatState(let c1, let s1), .chatState(let c2, let s2)): c1 == c2 && s1 == s2
+        case (.messageReactions(let c1, let m1, let r1), .messageReactions(let c2, let m2, let r2)): c1 == c2 && m1 == m2 && r1 == r2
+        case (.pollUpdated(let c1, let m1, let p1), .pollUpdated(let c2, let m2, let p2)): c1 == c2 && m1 == m2 && p1 == p2
         default: false
         }
     }
@@ -60,6 +70,99 @@ public actor Translator {
         let chatId: Int64
         let messageId: Int64
         let editDate: Int
+    }
+
+    /// What TDLib has said about each chat's read state, positions and notification settings,
+    /// from `updateNewChat` (or `getChat`) and the chat updates after it. Every chat TDLib
+    /// knows, monitored or not; held in memory only.
+    private var rawStates: [Int64: RawChatState] = [:]
+    /// `mute_for` of each notification settings scope, for chats that use the default.
+    private var scopeMuteFor: [String: Int] = [:]
+    /// The last reactions and poll seen per message, so that a view-count change or a repeated
+    /// update produces nothing. Bounded; most recent last.
+    private var lastReactions = BoundedMemo<MessageKey, [Reaction]>(capacity: 4096)
+    private var lastPolls = BoundedMemo<MessageKey, Poll>(capacity: 1024)
+
+    private struct MessageKey: Hashable {
+        let chatId: Int64
+        let messageId: Int64
+    }
+
+    struct RawChatState: Equatable {
+        var unreadCount = 0
+        var unreadMentionCount = 0
+        var lastReadInbox: Int64 = 0
+        var lastReadOutbox: Int64 = 0
+        var isMarkedAsUnread = false
+        var mainOrder: Int64 = 0
+        var mainPinned = false
+        var archiveOrder: Int64 = 0
+        var useDefaultMuteFor = true
+        var muteFor = 0
+        /// `notificationSettingsScope…` type that applies to the chat.
+        var scope = "notificationSettingsScopePrivateChats"
+
+        init() {}
+
+        /// From a TDLib `chat` object.
+        init(chat: JSONObject) {
+            unreadCount = chat.int("unread_count") ?? 0
+            unreadMentionCount = chat.int("unread_mention_count") ?? 0
+            lastReadInbox = chat.int64("last_read_inbox_message_id") ?? 0
+            lastReadOutbox = chat.int64("last_read_outbox_message_id") ?? 0
+            isMarkedAsUnread = chat.bool("is_marked_as_unread") ?? false
+            setPositions((chat.array("positions") ?? []).compactMap { $0 as? JSONObject })
+            if let settings = chat.object("notification_settings") { setNotificationSettings(settings) }
+            let type = chat.object("type")
+            switch type?.type {
+            case "chatTypeBasicGroup": scope = "notificationSettingsScopeGroupChats"
+            case "chatTypeSupergroup":
+                scope = type?.bool("is_channel") == true ? "notificationSettingsScopeChannelChats" : "notificationSettingsScopeGroupChats"
+            default: scope = "notificationSettingsScopePrivateChats"
+            }
+        }
+
+        /// Applies one `chatPosition`. Positions in folders are not tracked.
+        mutating func apply(position: JSONObject) {
+            let order = position.int64("order") ?? 0
+            switch position.object("list")?.type {
+            case "chatListMain":
+                mainOrder = order
+                mainPinned = order != 0 && (position.bool("is_pinned") ?? false)
+            case "chatListArchive":
+                archiveOrder = order
+            default:
+                break
+            }
+        }
+
+        /// Replaces every position: `updateChatLastMessage` and `updateChatDraftMessage` carry
+        /// the chat's full list of positions, and a list it is absent from is one it left.
+        mutating func setPositions(_ positions: [JSONObject]) {
+            mainOrder = 0
+            mainPinned = false
+            archiveOrder = 0
+            for position in positions { apply(position: position) }
+        }
+
+        mutating func setNotificationSettings(_ settings: JSONObject) {
+            useDefaultMuteFor = settings.bool("use_default_mute_for") ?? true
+            muteFor = settings.int("mute_for") ?? 0
+        }
+
+        func state(scopeMuteFor: [String: Int]) -> ChatState {
+            ChatState(
+                unreadCount: unreadCount,
+                unreadMentionCount: unreadMentionCount,
+                lastReadInboxMessageId: lastReadInbox > 0 ? MessageId.toPublic(lastReadInbox) : nil,
+                lastReadOutboxMessageId: lastReadOutbox > 0 ? MessageId.toPublic(lastReadOutbox) : nil,
+                isMarkedAsUnread: isMarkedAsUnread,
+                isPinned: mainPinned,
+                order: String(mainOrder),
+                isArchived: archiveOrder != 0,
+                isMuted: (useDefaultMuteFor ? scopeMuteFor[scope] ?? 0 : muteFor) > 0
+            )
+        }
     }
 
     public init(tdlib: any TDLibRequesting) {
@@ -89,7 +192,75 @@ public actor Translator {
 
         case "updateMessageContent":
             guard let chatId = update.int64("chat_id"), let messageId = update.int64("message_id") else { return [] }
+            if let content = update.object("new_content"), content.type == "messagePoll" {
+                // A vote or a poll being closed: not an edit, but the poll's new state.
+                guard let poll = Translator.poll(of: content) else { return [] }
+                let publicId = MessageId.toPublic(messageId)
+                let key = MessageKey(chatId: chatId, messageId: publicId)
+                if lastPolls[key] == poll { return [] }
+                lastPolls[key] = poll
+                return [.pollUpdated(chatId: chatId, messageId: publicId, poll)]
+            }
             return try await edited(chatId: chatId, messageId: messageId, editDate: nil)
+
+        case "updateMessageInteractionInfo":
+            guard let chatId = update.int64("chat_id"), let messageId = update.int64("message_id") else { return [] }
+            // Also sent for view and forward counts; only a change of reactions is an event.
+            let reactions = Translator.reactions(of: update.object("interaction_info"))
+            let publicId = MessageId.toPublic(messageId)
+            let key = MessageKey(chatId: chatId, messageId: publicId)
+            let previous = lastReactions[key]
+            if previous == reactions { return [] }
+            lastReactions[key] = reactions
+            return [.messageReactions(chatId: chatId, messageId: publicId, reactions)]
+
+        case "updateNewChat":
+            guard let chat = update.object("chat"), let chatId = chat.int64("id") else { return [] }
+            rawStates[chatId] = RawChatState(chat: chat)
+            return chatState(chatId)
+
+        case "updateChatReadInbox":
+            return try await changeState(update) { raw in
+                raw.lastReadInbox = update.int64("last_read_inbox_message_id") ?? raw.lastReadInbox
+                raw.unreadCount = update.int("unread_count") ?? raw.unreadCount
+            }
+
+        case "updateChatReadOutbox":
+            return try await changeState(update) { raw in
+                raw.lastReadOutbox = update.int64("last_read_outbox_message_id") ?? raw.lastReadOutbox
+            }
+
+        case "updateChatUnreadMentionCount", "updateMessageMentionRead":
+            return try await changeState(update) { raw in
+                raw.unreadMentionCount = update.int("unread_mention_count") ?? raw.unreadMentionCount
+            }
+
+        case "updateChatIsMarkedAsUnread":
+            return try await changeState(update) { raw in
+                raw.isMarkedAsUnread = update.bool("is_marked_as_unread") ?? raw.isMarkedAsUnread
+            }
+
+        case "updateChatPosition":
+            guard let position = update.object("position") else { return [] }
+            return try await changeState(update) { raw in raw.apply(position: position) }
+
+        case "updateChatLastMessage", "updateChatDraftMessage":
+            guard let positions = update.array("positions") else { return [] }
+            return try await changeState(update) { raw in raw.setPositions(positions.compactMap { $0 as? JSONObject }) }
+
+        case "updateChatNotificationSettings":
+            guard let settings = update.object("notification_settings") else { return [] }
+            return try await changeState(update) { raw in raw.setNotificationSettings(settings) }
+
+        case "updateScopeNotificationSettings":
+            guard let scope = update.object("scope")?.type, let settings = update.object("notification_settings") else { return [] }
+            let before = scopeMuteFor
+            scopeMuteFor[scope] = settings.int("mute_for") ?? 0
+            return rawStates.keys.sorted().compactMap { chatId -> Translated? in
+                guard let raw = rawStates[chatId], raw.scope == scope, raw.useDefaultMuteFor,
+                      raw.state(scopeMuteFor: before).isMuted != raw.state(scopeMuteFor: scopeMuteFor).isMuted else { return nil }
+                return .chatState(chatId: chatId, raw.state(scopeMuteFor: scopeMuteFor))
+            }
 
         case "updateDeleteMessages":
             guard update.bool("is_permanent") == true, update.bool("from_cache") != true,
@@ -154,6 +325,34 @@ public actor Translator {
         }
     }
 
+    // MARK: Chat state
+
+    /// The chat's current state, if TDLib has announced the chat.
+    public func state(_ chatId: Int64) -> ChatState? {
+        rawStates[chatId]?.state(scopeMuteFor: scopeMuteFor)
+    }
+
+    private func chatState(_ chatId: Int64) -> [Translated] {
+        guard let state = state(chatId) else { return [] }
+        return [.chatState(chatId: chatId, state)]
+    }
+
+    /// Applies a chat update to the chat's raw state. A chat TDLib has not announced with
+    /// `updateNewChat` is read with `getChat` first; nothing is emitted if that fails.
+    private func changeState(_ update: JSONObject, _ change: (inout RawChatState) -> Void) async throws -> [Translated] {
+        guard let chatId = update.int64("chat_id") else { return [] }
+        if rawStates[chatId] == nil {
+            guard let chat = try? await tdlib.request("getChat", ["chat_id": chatId]).object else { return [] }
+            rawStates[chatId] = RawChatState(chat: chat)
+        }
+        guard var raw = rawStates[chatId] else { return [] }
+        let before = raw
+        change(&raw)
+        guard raw != before else { return [] }
+        rawStates[chatId] = raw
+        return chatState(chatId)
+    }
+
     /// Both edit updates converge here: fetch the message, emit once per (chat, id, edit_date).
     /// A content change on a never-edited message (a poll vote, a link preview loading) is
     /// not an edit and produces nothing.
@@ -184,9 +383,20 @@ public actor Translator {
         let chat = try await chatInfo(chatId)
         let sender = try await translateSender(m.object("sender_id"), fallbackChat: chat)
         let content = m.object("content") ?? [:]
-        let (text, entities) = Translator.text(of: content)
+        var (text, entities) = Translator.text(of: content)
         let (mediaList, records) = Translator.media(of: content)
         let publicId = MessageId.toPublic(internalId)
+        if text.isEmpty, let service = try await serviceText(content, sender: sender, chat: chat, isOutgoing: m.bool("is_outgoing") ?? false) {
+            text = service
+            entities = []
+        }
+        let reactions = Translator.reactions(of: m.object("interaction_info"))
+        let poll = Translator.poll(of: content)
+        let key = MessageKey(chatId: chatId, messageId: publicId)
+        lastReactions[key] = reactions
+        if let poll { lastPolls[key] = poll }
+        var topicId: Int64?
+        if let topic = m.object("topic_id"), topic.type == "messageTopicForum" { topicId = topic.int64("forum_topic_id") }
         var replyTo: ReplyTo?
         if let reply = m.object("reply_to"), reply.type == "messageReplyToMessage",
            let replyChat = reply.int64("chat_id"), let replyMessage = reply.int64("message_id"), replyMessage != 0 {
@@ -212,7 +422,10 @@ public actor Translator {
             media: mediaList,
             mediaGroupId: albumId,
             link: chat.username.map { "https://t.me/\($0)/\(publicId)" },
-            rawContentType: content.type ?? "unknown"
+            rawContentType: content.type ?? "unknown",
+            reactions: reactions,
+            topicId: topicId,
+            poll: poll
         )
         return TranslatedMessage(chat: chat, message: message, media: records)
     }
@@ -254,7 +467,8 @@ public actor Translator {
         }
     }
 
-    /// Text or caption, plus the entity subset the format keeps, sorted by offset.
+    /// Text or caption, plus the entity subset the format keeps, sorted by offset and, at the
+    /// same offset, longest first, so that an enclosing span comes before what it encloses.
     static func text(of content: JSONObject) -> (String, [Entity]) {
         let formatted = content.object("text") ?? content.object("caption")
         guard let formatted else { return ("", []) }
@@ -272,11 +486,146 @@ public actor Translator {
             case "textEntityTypeTextUrl": entities.append(Entity(type: .textLink, offset: offset, length: length, url: type.string("url")))
             case "textEntityTypeBotCommand": entities.append(Entity(type: .botCommand, offset: offset, length: length))
             case "textEntityTypeEmailAddress": entities.append(Entity(type: .email, offset: offset, length: length))
+            case "textEntityTypeBold": entities.append(Entity(type: .bold, offset: offset, length: length))
+            case "textEntityTypeItalic": entities.append(Entity(type: .italic, offset: offset, length: length))
+            case "textEntityTypeUnderline": entities.append(Entity(type: .underline, offset: offset, length: length))
+            case "textEntityTypeStrikethrough": entities.append(Entity(type: .strikethrough, offset: offset, length: length))
+            case "textEntityTypeSpoiler": entities.append(Entity(type: .spoiler, offset: offset, length: length))
+            case "textEntityTypeCode": entities.append(Entity(type: .code, offset: offset, length: length))
+            case "textEntityTypePre": entities.append(Entity(type: .pre, offset: offset, length: length))
+            case "textEntityTypePreCode":
+                let language = type.string("language").flatMap { $0.isEmpty ? nil : $0 }
+                entities.append(Entity(type: .pre, offset: offset, length: length, language: language))
+            case "textEntityTypeBlockQuote", "textEntityTypeExpandableBlockQuote":
+                entities.append(Entity(type: .blockquote, offset: offset, length: length))
+            case "textEntityTypeCustomEmoji":
+                entities.append(Entity(type: .customEmoji, offset: offset, length: length, customEmojiId: type.int64("custom_emoji_id").map { String($0) }))
             default: continue
             }
         }
-        entities.sort { ($0.offset, $0.length) < ($1.offset, $1.length) }
+        entities.sort { ($0.offset, -$0.length) < ($1.offset, -$1.length) }
         return (text, entities)
+    }
+
+    /// `messageInteractionInfo.reactions` → reactions, in TDLib's order (most popular first).
+    /// Paid (Telegram Star) reactions have neither an emoji nor a custom emoji identifier.
+    static func reactions(of info: JSONObject?) -> [Reaction] {
+        let list = info?.object("reactions")?.array("reactions") ?? []
+        return list.compactMap { any -> Reaction? in
+            guard let reaction = any as? JSONObject, let type = reaction.object("type") else { return nil }
+            let count = reaction.int("total_count") ?? 0
+            let chosen = reaction.bool("is_chosen") ?? false
+            switch type.type {
+            case "reactionTypeEmoji":
+                guard let emoji = type.string("emoji") else { return nil }
+                return Reaction(emoji: emoji, customEmojiId: nil, count: count, chosen: chosen)
+            case "reactionTypePaid":
+                return Reaction(emoji: nil, customEmojiId: nil, count: count, chosen: chosen)
+            case "reactionTypeCustomEmoji":
+                guard let id = type.int64("custom_emoji_id") else { return nil }
+                return Reaction(emoji: nil, customEmojiId: String(id), count: count, chosen: chosen)
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// A `messagePoll` content → the poll object; nil for any other content.
+    static func poll(of content: JSONObject) -> Poll? {
+        guard content.type == "messagePoll", let poll = content.object("poll") else { return nil }
+        func plain(_ any: Any?) -> String {
+            if let text = any as? String { return text }
+            return (any as? JSONObject)?.string("text") ?? ""
+        }
+        let options = (poll.array("options") ?? []).compactMap { any -> Poll.Option? in
+            guard let option = any as? JSONObject else { return nil }
+            return Poll.Option(text: plain(option["text"]), voterCount: option.int("voter_count") ?? 0, isChosen: option.bool("is_chosen") ?? false)
+        }
+        return Poll(
+            question: plain(poll["question"]),
+            options: options,
+            totalVoterCount: poll.int("total_voter_count") ?? 0,
+            isClosed: poll.bool("is_closed") ?? false,
+            isAnonymous: poll.bool("is_anonymous") ?? false,
+            type: poll.object("type")?.type == "pollTypeQuiz" ? .quiz : .regular
+        )
+    }
+
+    /// A short English description of a service message ("Grace joined the group"), for the
+    /// common kinds; nil for everything else.
+    private func serviceText(_ content: JSONObject, sender: Sender, chat: ChatInfo, isOutgoing: Bool) async throws -> String? {
+        let who = sender.displayName
+        let noun = chat.type == .channel ? "channel" : "group"
+        func name(_ userId: Int64?) async throws -> String {
+            guard let userId else { return "Deleted Account" }
+            return try await user(userId).displayName
+        }
+        switch content.type {
+        case "messageChatAddMembers":
+            let ids = (content.array("member_user_ids") ?? []).compactMap(Translator.int64)
+            if ids == [sender.id] || ids.isEmpty { return "\(who) joined the \(noun)" }
+            var names: [String] = []
+            for id in ids { names.append(try await name(id)) }
+            return "\(who) added \(Translator.list(names))"
+        case "messageChatJoinByLink":
+            return "\(who) joined the \(noun) via invite link"
+        case "messageChatJoinByRequest":
+            return "\(who) joined the \(noun)"
+        case "messageChatDeleteMember":
+            let userId = content.int64("user_id")
+            if userId == sender.id { return "\(who) left the \(noun)" }
+            return "\(who) removed \(try await name(userId))"
+        case "messageChatChangeTitle":
+            return "\(who) changed the \(noun) name to \u{201C}\(content.string("title") ?? "")\u{201D}"
+        case "messageChatChangePhoto":
+            return "\(who) changed the \(noun) photo"
+        case "messageChatDeletePhoto":
+            return "\(who) removed the \(noun) photo"
+        case "messagePinMessage":
+            return "\(who) pinned a message"
+        case "messageBasicGroupChatCreate", "messageSupergroupChatCreate":
+            if chat.type == .channel { return "Channel created" }
+            return "\(who) created the group \u{201C}\(content.string("title") ?? "")\u{201D}"
+        case "messageChatUpgradeTo", "messageChatUpgradeFrom":
+            return "The group was upgraded to a supergroup"
+        case "messageScreenshotTaken":
+            return "\(who) took a screenshot"
+        case "messageContactRegistered":
+            return "\(who) joined Telegram"
+        case "messageForumTopicCreated":
+            return "\(who) created the topic \u{201C}\(content.string("name") ?? "")\u{201D}"
+        case "messageVideoChatStarted":
+            return "Video chat started"
+        case "messageVideoChatEnded":
+            let duration = content.int("duration") ?? 0
+            return duration > 0 ? "Video chat ended (\(Translator.duration(duration)))" : "Video chat ended"
+        case "messageCall":
+            let kind = content.bool("is_video") == true ? "video call" : "call"
+            let duration = content.int("duration") ?? 0
+            switch content.object("discard_reason")?.type {
+            case "callDiscardReasonMissed":
+                return isOutgoing ? "Cancelled \(kind)" : "Missed \(kind)"
+            case "callDiscardReasonDeclined":
+                return isOutgoing ? "Outgoing \(kind), declined" : "Declined \(kind)"
+            default:
+                let direction = isOutgoing ? "Outgoing" : "Incoming"
+                return duration > 0 ? "\(direction) \(kind) (\(Translator.duration(duration)))" : "\(direction) \(kind)"
+            }
+        default:
+            return nil
+        }
+    }
+
+    /// "Ada", "Ada and Grace", "Ada, Grace and Alan".
+    static func list(_ names: [String]) -> String {
+        guard names.count > 1, let last = names.last else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " and " + last
+    }
+
+    /// Seconds as m:ss, or h:mm:ss from an hour.
+    static func duration(_ seconds: Int) -> String {
+        let h = seconds / 3600, m = (seconds % 3600) / 60, s = seconds % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
     /// The media object (zero or one) of a message content, and the index records for it.
@@ -341,14 +690,20 @@ public actor Translator {
     /// The full chat object from TDLib's cache: `getChat`, then the type-specific object for
     /// username and member count. `refresh` bypasses the memo. Throws `chat_not_monitorable`
     /// for secret chats and for ids TDLib does not know.
+    /// `state` is the tracked read state and position, current even when the rest is memoised.
     public func chatInfo(_ chatId: Int64, refresh: Bool = false) async throws -> ChatInfo {
-        if !refresh, let cached = chatCache[chatId] { return cached }
+        if !refresh, var cached = chatCache[chatId] {
+            cached.state = state(chatId)
+            return cached
+        }
         let chat: JSONObject
         do {
             chat = try await tdlib.request("getChat", ["chat_id": chatId]).object
         } catch let error as TDLibError where error.code == 400 || error.code == 404 {
             throw APIError.chatNotMonitorable(chatId)
         }
+        // Updates keep the state current once TDLib has announced the chat.
+        if rawStates[chatId] == nil { rawStates[chatId] = RawChatState(chat: chat) }
         let title = chat.string("title") ?? ""
         var photo: ChatPhoto?
         if let big = chat.object("photo")?.object("big"), let uniqueId = big.object("remote")?.string("unique_id"), !uniqueId.isEmpty {
@@ -387,7 +742,9 @@ public actor Translator {
             throw APIError.chatNotMonitorable(chatId)
         }
         chatCache[chatId] = info
-        return info
+        var result = info
+        result.state = state(chatId)
+        return result
     }
 
     /// The chat photo's media index record, if the chat has one (for `GET /v1/media`).
@@ -443,6 +800,21 @@ public actor Translator {
         }
     }
 
+    /// Loads a main or archive chat list without opening chats or marking messages read.
+    /// Keeps TDLib's order; callers paginate the resulting identifiers.
+    public func chatList(archived: Bool = false) async throws -> [Int64] {
+        let list: JSONObject = ["@type": archived ? "chatListArchive" : "chatListMain"]
+        for _ in 0..<100 {
+            do {
+                _ = try await tdlib.request("loadChats", ["chat_list": list, "limit": 100])
+            } catch let error as TDLibError where error.code == 404 {
+                break
+            }
+        }
+        let response = try await tdlib.request("getChats", ["chat_list": list, "limit": 10_000]).object
+        return (response.array("chat_ids") ?? []).compactMap(Translator.int64)
+    }
+
     // MARK: History
 
     /// `getChatHistory` → messages, newest first, as TDLib returns them.
@@ -462,5 +834,30 @@ public actor Translator {
     public func clearCaches() {
         chatCache.removeAll()
         userCache.removeAll()
+    }
+}
+
+/// A dictionary that forgets its oldest entries beyond `capacity`.
+struct BoundedMemo<Key: Hashable, Value> {
+    let capacity: Int
+    private var values: [Key: Value] = [:]
+    private var order: [Key] = []
+
+    init(capacity: Int) {
+        self.capacity = capacity
+    }
+
+    subscript(key: Key) -> Value? {
+        get { values[key] }
+        set {
+            if values[key] == nil { order.append(key) }
+            values[key] = newValue
+            if newValue == nil { order.removeAll { $0 == key } }
+            if order.count > capacity {
+                let drop = order.count - capacity
+                for old in order.prefix(drop) { values.removeValue(forKey: old) }
+                order.removeFirst(drop)
+            }
+        }
     }
 }

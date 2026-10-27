@@ -49,15 +49,18 @@ struct MonitorCommand: AsyncParsableCommand {
         @Flag(help: "List every chat in the account's main chat list (needs a logged-in daemon).")
         var all = false
 
+        @Flag(help: "List archived chats (implies --all).")
+        var archive = false
+
         @OptionGroup var output: OutputOptions
 
         func run() async throws {
             let client = try Admin.client()
-            if all {
+            if all || archive {
                 var cursor: String?
                 var rows: [[String]] = []
                 repeat {
-                    let path = "/v1/admin/chats?all=true&limit=200" + (cursor.map { "&cursor=\($0)" } ?? "")
+                    let path = "/v1/admin/chats?all=true&limit=200" + (archive ? "&list=archive" : "") + (cursor.map { "&cursor=\($0)" } ?? "")
                     let page = try Admin.check(try await client.get(path))
                     if output.json { print(page.pretty()) }
                     rows += (page["chats"]?.arrayValue ?? []).map { c in

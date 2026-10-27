@@ -9,6 +9,16 @@ import Logging
 import NIOCore
 
 /// Everything the routes need, built by the daemon (real) or a test (fakes).
+extension Dependencies {
+    /// A cached chat with its read state and position as TDLib reports them now. The store
+    /// holds the state of monitored chats; this also covers granted chats no longer monitored.
+    func live(_ chat: ChatInfo) async -> ChatInfo {
+        var chat = chat
+        if let state = await translator.state(chat.id) { chat.state = state }
+        return chat
+    }
+}
+
 public struct Dependencies: Sendable {
     public var store: Store
     public var eventLog: EventLog

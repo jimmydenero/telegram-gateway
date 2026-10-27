@@ -6,7 +6,7 @@ import Testing
 @Suite struct StoreTests {
     @Test func migrationsCreateEveryTable() async throws {
         let store = try Store.inMemory()
-        #expect(try await store.appliedMigrations() == ["v1"])
+        #expect(try await store.appliedMigrations() == ["v1", "v2-chat-state"])
         #expect(try await store.tableNames() == [
             "access_requests", "chat_cursors", "chats", "deliveries", "events", "folders", "grants", "media", "media_refs",
             "meta", "monitored_sources",
@@ -22,7 +22,7 @@ import Testing
         try await store.setMeta("k", "v")
         let reopened = try Store.open(paths: paths)
         #expect(try await reopened.meta("k") == "v")
-        #expect(try await reopened.appliedMigrations() == ["v1"])
+        #expect(try await reopened.appliedMigrations() == ["v1", "v2-chat-state"])
     }
 
     @Test func monitoredSetAndEffectiveSetThroughFolders() async throws {

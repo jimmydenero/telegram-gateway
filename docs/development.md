@@ -316,7 +316,8 @@ connected.
 The monitored set: the chats, and the chat folders, the gateway watches.
 
 ```
-$ tgw monitor list --all          # every chat in the account; needs a logged-in gateway
+$ tgw monitor list --archive      # archived chats; implies --all
+$ tgw monitor list --all          # main-list chats; needs a logged-in gateway
 id               type        monitored  title
 -1001234567890   channel     yes        Acme Product Updates
 -1001987654321   channel                Acme Support

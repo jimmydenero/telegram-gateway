@@ -145,8 +145,11 @@ struct AppRoutes {
     func chats(_ context: GatewayRequestContext) async throws -> Response {
         let principal = try context.requirePrincipal()
         try await deps.grants.require(.chatsRead, principal)
-        let chats = try await deps.grants.chats(for: principal)
-        return json(["chats": .array(chats.map { $0.chat.json(isMonitored: $0.isMonitored) })])
+        var items: [JSONValue] = []
+        for (chat, isMonitored) in try await deps.grants.chats(for: principal) {
+            items.append(await deps.live(chat).json(isMonitored: isMonitored))
+        }
+        return json(["chats": .array(items)])
     }
 
     func chat(_ context: GatewayRequestContext) async throws -> Response {
@@ -158,7 +161,7 @@ struct AppRoutes {
         }
         guard let chat = try await deps.store.chat(chatId) else { throw APIError.chatNotGranted }
         let monitored = try await deps.store.effectiveMonitoredChatIds().contains(chatId)
-        return json(["chat": chat.json(isMonitored: monitored)])
+        return json(["chat": await deps.live(chat).json(isMonitored: monitored)])
     }
 
     // MARK: History
