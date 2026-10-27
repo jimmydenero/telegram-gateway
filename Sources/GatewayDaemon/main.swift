@@ -80,7 +80,9 @@ struct GatewayDaemonCommand: AsyncParsableCommand {
         let mediaCache = MediaCache(store: store, tdlib: tdlib, maxBytes: config.mediaCacheMaxBytes, clock: clock, logger: Logger(label: "media"))
         let dispatcher = WebhookDispatcher(store: store, eventLog: eventLog, grants: grants, http: URLSessionWebhookClient(), clock: clock, logger: Logger(label: "webhooks"))
         let rateLimiter = RateLimiter(clock: clock)
-        let sender = MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock)
+        let uploads = paths.home.appending(path: "uploads")
+        MessageSender.removeStaleUploads(in: uploads, olderThan: clock.now.addingTimeInterval(-24 * 3600))
+        let sender = MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock, uploadDirectory: uploads)
         let shutdown = ShutdownSignal()
 
         try await monitor.load()

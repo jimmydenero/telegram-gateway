@@ -1,7 +1,7 @@
 # Telegram Gateway
 
 Telegram Gateway is a local API for building applications that consume Telegram messages,
-and, when the account owner allows it, reply to them. It runs on macOS, connects through a
+and, when the account owner allows it, reply to them and act on them. It runs on macOS, connects through a
 Telegram user account, and delivers events from selected chats over HTTP, WebSocket, or
 webhooks.
 
@@ -40,9 +40,10 @@ The gateway puts the login in one place:
 - **Resumable delivery.** Events are numbered and stored before delivery. Apps resume from
   their last processed sequence number while those events remain retained. Webhook consumers
   must handle duplicate deliveries.
-- **Read-only unless you allow sending.** The gateway sends a message only when the owner
-  does (`tgw send`) or an app holds the `messages:send` permission for that chat. It never
-  marks messages as read or sets the Telegram account online.
+- **Read-only unless you allow acting.** The gateway sends, forwards, edits, deletes,
+  reacts, votes, or pins, archives or mutes a chat only when the owner does (`tgw`) or an
+  app holds the permission for that chat (`messages:send`, `chats:manage`). It never marks
+  messages as read or sets the Telegram account online.
 
 - **Linkable to Volgenic.** `tgw link add` connects the gateway out to a Volgenic account,
   which can then sign in, choose chats, read and send through it without reaching your Mac
@@ -50,6 +51,16 @@ The gateway puts the login in one place:
 
 Typical integrations include product-mention alerts, support triage, news summarization, and
 community analytics. The gateway delivers messages; consuming applications perform analysis.
+
+## Actions
+
+An app holding `messages:send` can, in the chats granted to it, send formatted text and
+files (photos, videos, documents, voice notes, audio, animations, stickers), forward
+messages, edit and delete the account's own messages, react, and vote in polls. One holding
+`chats:manage` can pin, archive and mute those chats, and look up a chat by username or
+phone number. The owner can do the same with `tgw`, which asks before acting unless given
+`--yes`. See [docs/api.md](docs/api.md#message-and-chat-actions). The actions are new and
+have not yet been tried against a live Telegram account.
 
 ## Status
 
@@ -154,8 +165,8 @@ consumer.
 
 ## What it does not do
 
-- **Send anything but plain text.** Apps with the `messages:send` permission can send text
-  messages and replies to their granted chats; no media, formatting, edits or deletions.
+- **Mark messages as read, appear online or show "typing…".** No action does, and nothing
+  joins or leaves a group or channel.
 - **Analyze anything.** No classification, sentiment or search. Apps do that.
 - **Serve other machines directly.** The API listens on `127.0.0.1` only. An app running
   elsewhere can still receive events through webhooks, and a Volgenic account the owner

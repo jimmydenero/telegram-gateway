@@ -1,4 +1,5 @@
 import Foundation
+import GatewayCore
 import Synchronization
 
 /// Opens the WebSocket to Volgenic. `URLSessionLinkTransport` in the gateway; tests may
@@ -45,7 +46,7 @@ public enum LinkTransportError: Error, Equatable, CustomStringConvertible {
 public struct URLSessionLinkTransport: LinkTransport {
     /// Inbound frames larger than this fail the connection. Requests are small; 16 MiB is
     /// generous.
-    public var maximumMessageSize = 16 * 1024 * 1024
+    public var maximumMessageSize = ActionInput.maxUploadBodyBytes + 64 * 1024
     public var connectTimeout: TimeInterval = 30
 
     public init() {}

@@ -82,6 +82,14 @@ struct AppRoutes {
         group.get("/chats/:chat_id") { _, context in try await chat(context) }
         group.get("/chats/:chat_id/messages") { request, context in try await history(request, context) }
         group.post("/chats/:chat_id/messages") { request, context in try await sendMessage(request, context) }
+        group.post("/chats") { request, context in try await startChat(request, context) }
+        group.patch("/chats/:chat_id") { request, context in try await settings(request, context) }
+        group.post("/chats/:chat_id/forward") { request, context in try await forward(request, context) }
+        group.patch("/chats/:chat_id/messages/:message_id") { request, context in try await edit(request, context) }
+        group.delete("/chats/:chat_id/messages") { request, context in try await deleteMessages(request, context) }
+        group.put("/chats/:chat_id/messages/:message_id/reactions") { request, context in try await react(request, context, remove: false) }
+        group.delete("/chats/:chat_id/messages/:message_id/reactions") { request, context in try await react(request, context, remove: true) }
+        group.post("/chats/:chat_id/messages/:message_id/poll") { request, context in try await vote(request, context) }
         group.get("/events") { request, context in try await events(request, context) }
         group.get("/media/:media_id") { request, context in try await media(request, context, head: false) }
         group.head("/media/:media_id") { request, context in try await media(request, context, head: true) }
@@ -194,14 +202,8 @@ struct AppRoutes {
         let principal = try context.requirePrincipal()
         try await deps.grants.require(.messagesSend, principal)
         let chatId = try parseChatId(try context.parameters.require("chat_id"), field: "chat_id")
-        let body = try await jsonBody(request, context)
-        let text = try body.requiredString("text")
-        var replyTo: Int64?
-        if let raw = try body.optionalString("reply_to") {
-            guard let id = Int64(raw), id > 0 else { throw APIError.invalidRequest("reply_to", "must be a message id string") }
-            replyTo = id
-        }
-        let message = try await deps.sender.send(text, to: chatId, replyTo: replyTo, as: principal)
+        let body = try await jsonBody(request, context, limit: ActionInput.maxUploadBodyBytes)
+        let message = try await deps.sender.send(body, to: chatId, as: principal)
         return json(["message": message.json], status: .created)
     }
 

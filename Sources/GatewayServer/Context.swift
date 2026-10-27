@@ -46,7 +46,7 @@ public struct Dependencies: Sendable {
 
     public init(
         store: Store, eventLog: EventLog, grants: Grants, accessRequests: AccessRequests, monitor: Monitor,
-        translator: Translator, mediaCache: MediaCache, sender: MessageSender? = nil, dispatcher: WebhookDispatcher?, telegram: any TelegramControl,
+        translator: Translator, mediaCache: MediaCache, sender: MessageSender? = nil, uploadDirectory: URL? = nil, dispatcher: WebhookDispatcher?, telegram: any TelegramControl,
         reloader: ConfigReloader? = nil, links: LinkManager? = nil, rateLimiter: RateLimiter, clock: any GatewayClock, config: Config, shutdown: ShutdownSignal = ShutdownSignal(),
         startedAt: Date, version: String = "0.1.0", logger: Logger = Logger(label: "server")
     ) {
@@ -57,7 +57,7 @@ public struct Dependencies: Sendable {
         self.monitor = monitor
         self.translator = translator
         self.mediaCache = mediaCache
-        self.sender = sender ?? MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock)
+        self.sender = sender ?? MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock, uploadDirectory: uploadDirectory)
         self.dispatcher = dispatcher
         self.telegram = telegram
         self.reloader = reloader
@@ -222,11 +222,11 @@ func parseChatId(_ raw: String, field: String) throws -> Int64 {
 }
 
 /// Reads and parses the JSON body (object required). Over 64 KiB → `413 payload_too_large`.
-func jsonBody(_ request: Request, _ context: GatewayRequestContext) async throws -> JSONObjectValue {
+func jsonBody(_ request: Request, _ context: GatewayRequestContext, limit: Int? = nil) async throws -> JSONObjectValue {
     var request = request
     let buffer: ByteBuffer
     do {
-        buffer = try await request.collectBody(upTo: context.maxUploadSize)
+        buffer = try await request.collectBody(upTo: limit ?? context.maxUploadSize)
     } catch is NIOTooManyBytesError {
         throw APIError.payloadTooLarge
     } catch let error as HTTPError where error.status == .contentTooLarge {

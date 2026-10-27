@@ -1,8 +1,10 @@
 import Foundation
 import TDLibClient
 
-/// Sends text messages for the `messages:send` scope and for the owner's `tgw send`
-/// (docs/api.md "Sending messages"). The one place in the gateway that calls `sendMessage`.
+/// Sends messages for the `messages:send` scope and for the owner's `tgw send`
+/// (docs/api.md "Sending messages"). The one place in the gateway that calls `sendMessage`,
+/// and, in MessageActions.swift, the one that forwards, edits, deletes, reacts, votes and
+/// changes chat settings (docs/api.md "Message and chat actions").
 ///
 /// TDLib answers `sendMessage` at once with a temporary copy of the message (a local id and a
 /// `sending_state`); the server's verdict arrives later as `updateMessageSendSucceeded` (with
@@ -32,13 +34,15 @@ public actor MessageSender {
         let localId: Int64
     }
 
-    private let grants: Grants
-    private let translator: Translator
-    private let telegram: any TelegramControl
-    private let rateLimiter: RateLimiter
-    private let clock: any GatewayClock
+    let grants: Grants
+    let translator: Translator
+    let telegram: any TelegramControl
+    let rateLimiter: RateLimiter
+    let clock: any GatewayClock
     private let timeout: Duration
 
+    private let uploadDirectory: URL?
+    private var uploads: [Key: URL] = [:]
     private var waiting: [Key: CheckedContinuation<Outcome, Never>] = [:]
     /// Verdicts that arrived before `send` started waiting for them (the update stream and
     /// the request's response travel separately). Bounded; oldest first.
@@ -46,14 +50,27 @@ public actor MessageSender {
 
     public init(
         grants: Grants, translator: Translator, telegram: any TelegramControl, rateLimiter: RateLimiter,
-        clock: any GatewayClock = SystemClock(), timeout: Duration = MessageSender.defaultTimeout
+        clock: any GatewayClock = SystemClock(), uploadDirectory: URL? = nil, timeout: Duration = MessageSender.defaultTimeout
     ) {
+        self.uploadDirectory = uploadDirectory
         self.grants = grants
         self.translator = translator
         self.telegram = telegram
         self.rateLimiter = rateLimiter
         self.clock = clock
         self.timeout = timeout
+    }
+
+    /// Removes upload directories left behind by an earlier run (a crash between writing a
+    /// file and Telegram's verdict). Only directories older than `cutoff` go, so that a
+    /// message TDLib is still resending after a restart keeps its file.
+    public nonisolated static func removeStaleUploads(in directory: URL, olderThan cutoff: Date) {
+        let manager = FileManager.default
+        guard let entries = try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { return }
+        for entry in entries {
+            let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if modified < cutoff { try? manager.removeItem(at: entry) }
+        }
     }
 
     /// Sends `text` to `chatId` as the user, optionally as a reply to the message with public
@@ -65,37 +82,57 @@ public actor MessageSender {
     /// (`400 invalid_request`), the rate limit (`429`), and a live Telegram session (`503`).
     /// Then `502 send_failed` if Telegram refuses, `504 send_timeout` if it does not answer.
     public func send(_ text: String, to chatId: Int64, replyTo: Int64? = nil, as principal: Principal) async throws -> Message {
-        try await grants.require(.messagesSend, principal)
-        if let grant = principal.grant {
-            guard let current = try await grants.grant(grant.id) else { throw APIError.invalidToken }
-            if let revokedAt = current.revokedAt { throw APIError.tokenRevoked(at: revokedAt) }
-        }
-        try await grants.requireChat(chatId, principal)
-        try MessageSender.validate(text: text)
-        if let replyTo, replyTo <= 0 { throw APIError.invalidRequest("reply_to", "must be a message id") }
-        let decision = await rateLimiter.hit("send:\(principal.rateLimitKey)", limit: MessageSender.sendsPerMinute)
-        guard decision.allowed else { throw APIError.rateLimited(retryAfter: decision.retryAfter) }
-        let tdlib = try await telegram.requireLive()
+        var body: JSONObjectValue = ["text": .string(text)]
+        if let replyTo { body["reply_to"] = .id(replyTo) }
+        return try await send(body, to: chatId, as: principal)
+    }
 
+    public func send(_ body: JSONObjectValue, to chatId: Int64, as principal: Principal) async throws -> Message {
+        try await checkAccess(.messagesSend, chats: [chatId], as: principal)
+        let input = try SendInput(body)
+        let replyTo = try ActionInput.optionalId(body, "reply_to", message: true)
+        let tdlib = try await limitAndRequireLive(principal)
+        var file: URL?
+        var content = input.content
+        if let data = input.data {
+            guard let uploadDirectory else { throw APIError.internalError("Upload directory is not configured") }
+            let directory = uploadDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            let path = directory.appendingPathComponent(input.fileName)
+            do { try data.write(to: path); try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path) }
+            catch { try? FileManager.default.removeItem(at: directory); throw error }
+            file = directory
+            var nested = content[input.fileField] as? JSONObject ?? [:]
+            nested[input.fileField] = ["@type": "inputFileLocal", "path": path.path]
+            content[input.fileField] = nested
+        }
         var fields: JSONObject = [
-            "chat_id": chatId,
-            "input_message_content": [
-                "@type": "inputMessageText",
-                "text": ["@type": "formattedText", "text": text, "entities": [JSONObject]()],
-                "clear_draft": false,
-            ] as JSONObject,
+            "chat_id": chatId, "input_message_content": content,
+            "options": ["@type": "messageSendOptions", "disable_notification": input.silent],
         ]
         if let replyTo {
             fields["reply_to"] = ["@type": "inputMessageReplyToMessage", "message_id": MessageId.toInternal(replyTo)] as JSONObject
         }
         let pending: JSONObject
         do {
+            try await checkAccess(.messagesSend, chats: [chatId], as: principal)
             pending = try await tdlib.request("sendMessage", fields).object
-        } catch let error as TDLibError {
-            throw MessageSender.apiError(code: error.code, message: error.message)
+        } catch {
+            if let file { try? FileManager.default.removeItem(at: file) }
+            if let error = error as? TDLibError { throw MessageSender.apiError(code: error.code, message: error.message) }
+            throw error
         }
+        return try await settle(JSONBox(pending), chatId: chatId, upload: file)
+    }
 
-        guard let localId = pending.int64("id") else { throw APIError.internalError("sendMessage returned a message without an id") }
+    func settle(_ box: JSONBox, chatId: Int64, upload: URL? = nil) async throws -> Message {
+        let pending = box.object
+        guard let localId = pending.int64("id") else {
+            if let upload { try? FileManager.default.removeItem(at: upload) }
+            throw APIError.internalError("sendMessage returned a message without an id")
+        }
+        let key = Key(chatId: pending.int64("chat_id") ?? chatId, localId: localId)
+        if let upload { uploads[key] = upload }
         let outcome: Outcome
         switch pending.object("sending_state")?.type {
         case nil:
@@ -109,8 +146,10 @@ public actor MessageSender {
 
         switch outcome {
         case .succeeded(let message):
+            cleanUpload(key)
             return try await translator.translateMessage(message).message
         case .failed(let code, let message):
+            cleanUpload(key)
             throw MessageSender.apiError(code: code, message: message)
         case .timedOut:
             throw APIError.sendTimeout(chatId: chatId, after: timeout)
@@ -157,7 +196,7 @@ public actor MessageSender {
             guard let chatId = object.int64("chat_id") else { return }
             for id in (object.array("message_ids") ?? []).compactMap(Translator.int64) {
                 let key = Key(chatId: chatId, localId: id)
-                if waiting[key] != nil { resolve(key, .failed(code: 0, message: "The message was deleted before it was sent.")) }
+                if waiting[key] != nil || uploads[key] != nil { resolve(key, .failed(code: 0, message: "The message was deleted before it was sent.")) }
             }
         default:
             return
@@ -183,12 +222,17 @@ public actor MessageSender {
         }
     }
 
+    private func cleanUpload(_ key: Key) {
+        if let file = uploads.removeValue(forKey: key) { try? FileManager.default.removeItem(at: file) }
+    }
+
     private func resolve(_ key: Key, _ outcome: Outcome, keepIfUnclaimed: Bool = true) {
+        switch outcome { case .timedOut: break; default: cleanUpload(key) }
         if let continuation = waiting.removeValue(forKey: key) {
             continuation.resume(returning: outcome)
         } else if keepIfUnclaimed {
             early.append((key, outcome))
-            if early.count > 64 { early.removeFirst(early.count - 64) }
+            if early.count > 1024 { early.removeFirst(early.count - 1024) }
         }
     }
 }

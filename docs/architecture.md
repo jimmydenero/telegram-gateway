@@ -208,11 +208,13 @@ grant takes effect immediately on HTTP, WebSocket and webhooks.
 
 ## What the gateway does not do
 
-- **It sends messages only when asked.** The account is a real personal account, so sending
-  is the one action the gateway takes, and only on request: from the user with `tgw send` or
+- **It acts only when asked.** The account is a real personal account, so the gateway sends
+  and acts on messages only on request: from the user with `tgw send` or
   through the Volgenic account they linked, or from an app the user granted `messages:send`,
-  always to a monitored chat. It sends plain
-  text and nothing else, and never on its own initiative.
+  always to a monitored chat. Forwarding, editing and deleting its own messages, reacting,
+  voting, and pinning, archiving and muting chats work the same way: on request only,
+  through `MessageSender`, never on the gateway's own initiative
+  ([api.md](api.md#message-and-chat-actions)).
 - **It does not mark anything as read and does not appear online.** It never calls the TDLib
   functions that count as viewing a chat, and it tells Telegram the account is offline. The
   user's own Telegram apps behave as if the gateway did not exist.
@@ -278,3 +280,11 @@ webhook's secret, so the receiving app can verify that it came from the gateway.
 **Nothing unmonitored is stored or served.** The gateway's own database never contains a
 message from a chat outside the monitored set, and no response, including error messages,
 reveals that such a chat exists.
+
+`MessageSender` is the one actor that acts on the account. Every action, whether from an app,
+`tgw` or the link, passes the same checks there: the scope (`messages:send`, or
+`chats:manage` for chat settings and starting chats), that the grant is still in force, that
+each chat is granted and monitored, the shared rate limit, and a live session. A file to send
+is written to `uploads/` in the data directory for TDLib to read, and removed once Telegram
+answers. Only the admin token's `POST /v1/chats` changes the monitored set; an app's lookup
+never widens its grant.
