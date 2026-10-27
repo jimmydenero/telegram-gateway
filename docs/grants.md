@@ -67,7 +67,8 @@ event log or delivered.](images/grants.png)
 | Ask for access again, or for more. | Approve itself, widen its own grant, or see other apps' grants. |
 | Send messages and files as the user, forward messages, edit and delete the user's own messages, react and vote in polls, in chats that are both granted to it and monitored, if it holds `messages:send`. | Do any of that in another chat, or edit or delete someone else's message. |
 | Pin, archive and mute its granted chats, and look up a chat by username or phone number, if it holds `chats:manage`. | Add a chat to its grant by looking it up: a chat found that way must already be granted. |
-| | Mark anything as read, make the account appear online, show "typing…", join or leave groups and channels, or act on the account in any other way. |
+| Mark its granted chats read as the user when a person using it read them, if it holds `messages:mark_read`. The senders then see read receipts. | Mark any other chat read. |
+| | Make the account appear online, show "typing…", join or leave groups and channels, or act on the account in any other way. |
 
 Three consequences of the rule:
 
@@ -94,12 +95,13 @@ data; the chat set determines from which chats. Both apply to every request.
 | `media:read` | Photos and files | Downloading the files attached to messages, and chat photos. Without it, messages still describe their media (kind, size, file name); only the bytes are withheld. | `GET /v1/media/{media_id}` |
 | `chats:read` | Chat names and details | Listing granted chats with title, username, member count, read state, position and mute state, and learning when coverage changes. | `GET /v1/chats`, and the `chat.updated`, `chat.read`, `chat.position`, `monitoring.started` and `monitoring.stopped` events. |
 | `messages:send` | Send and react | Acting on messages **as the user** in the granted chats: sending text and files, optionally formatted or as a reply; forwarding (both chats must be granted); editing and deleting the user's own messages; reacting; voting in polls. Everyone in the chat sees these as the user's. | `POST /v1/chats/{chat_id}/messages` and the [message actions](api.md#message-and-chat-actions) |
+| `messages:mark_read` | Mark as read | Marking the granted chats read **as the user**, up to a message or the newest, and optionally clearing unread mentions. The people who wrote the messages see read receipts, and the unread badges clear on the user's other devices. Granted only if the app asked for it. | `POST /v1/chats/{chat_id}/read` |
 | `chats:manage` | Manage chats | Pinning, archiving and muting the granted chats, which changes how they appear in the user's own Telegram apps, and looking up a chat by username or phone number. | `PATCH /v1/chats/{chat_id}`, `POST /v1/chats` |
 
 Until this version `messages:send` allowed sending plain text only. A grant approved then
 keeps the scope and so can now also forward, edit, delete, react and vote; the user who does
-not want that revokes the grant, and the app asks again. `chats:manage` is new, so no existing
-grant holds it.
+not want that revokes the grant, and the app asks again. `chats:manage` and `messages:mark_read` are
+new, so no existing grant holds them.
 
 `GET /v1/me` and the endpoints under `/v1/me/webhook` need no particular scope: any valid app
 token can inspect its own grant and manage its own webhook.
@@ -117,7 +119,8 @@ Ask for the least you need. The user sees the scopes when approving, and a reque
 "Photos and files" from an app that only counts hashtags looks wrong. Ask for
 `messages:send` only if a person using your app decides what is sent: the user is lending
 the app their name in every granted chat. Ask for `chats:manage` only if a person using your
-app pins, archives or mutes chats in it.
+app pins, archives or mutes chats in it, and for `messages:mark_read` only if your app marks
+a chat read when a person opens it, never on its own: the user's contacts see the receipts.
 
 ---
 
@@ -193,13 +196,14 @@ Can read
 Can act as you
   [x] Send and react           Sends messages and files as you, forwards, edits and
                                deletes what you sent, reacts and votes; people see it as you
+  [x] Mark as read             Mark messages read as you: senders see read receipts
 
 2 chats · 4 permissions                          [ Cancel ]   [ Approve ]
 ```
 
-**Can act as you** appears only when the app asked for `messages:send` or `chats:manage`
-("Manage chats: pins, archives and mutes these chats, and finds chats by username or phone
-number"). Each is ticked like the other permissions the app asked for, and kept apart from
+**Can act as you** appears only when the app asked for `messages:send`, `messages:mark_read`
+or `chats:manage` ("Manage chats: pins, archives and mutes these chats, and finds chats by
+username or phone number"). Each is ticked like the other permissions the app asked for, and kept apart from
 them so that it is never mistaken for one more kind of reading. Unticking one gives the app
 everything else it asked for, without it. This wording is in the menu bar app's source but
 the app has not been built or run with it.
@@ -305,9 +309,10 @@ These hold by construction. None of them is a setting.
    edited or deleted, a reaction or vote given, or a chat pinned, archived or muted, only
    on a request from the user (`tgw`, with the admin token) or from an app holding the
    scope for it, in a monitored chat in its grant. Nothing is done on the gateway's own
-   initiative, and nothing is retried. It never marks messages as read, opens chats in a
-   way Telegram counts as viewing, sets the account online, shows "typing…", or joins or
-   leaves groups and channels.
+   initiative, and nothing is retried. It marks messages read only on such a request, for
+   `tgw read` or an app holding `messages:mark_read`, when a person read the chat. It never
+   opens chats in a way Telegram counts as viewing, sets the account online, shows
+   "typing…", or joins or leaves groups and channels.
 4. **The user sees who has what.** Every grant is visible in the menu bar app with its
    scopes, its chats, where it delivers, and when access began.
 5. **Approval is a person's act.** Nothing automated can create or widen a grant.
@@ -331,7 +336,7 @@ Two things the gateway does not guarantee, because it cannot:
 
 | Not supported | Instead |
 |---|---|
-| Any action on the account beyond those in [api.md](api.md#message-and-chat-actions) | Not possible. In particular, nothing marks messages read, joins a group or channel, or edits or deletes another person's message. |
+| Any action on the account beyond those in [api.md](api.md#message-and-chat-actions) | Not possible. In particular, nothing joins a group or channel, edits or deletes another person's message, or marks a chat read on its own initiative. |
 | Changing a grant's scopes or chat list after approval | The user revokes, and the app requests access again. A folder grant follows its folder without this. |
 | Restoring a revoked grant | The app requests access again and receives a new token. |
 | Token expiry or rotation | Tokens are valid until the grant is revoked. |

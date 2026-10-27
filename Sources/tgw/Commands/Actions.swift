@@ -61,6 +61,26 @@ struct Vote: AsyncParsableCommand {
     }
     func run() async throws { try await action("POST", "/v1/chats/\(values[0])/messages/\(values[1])/poll", ["option_ids": .array(values.dropFirst(2).compactMap(Double.init).map(JSONValue.number))], yes: yes) }
 }
+struct ReadCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "read",
+        abstract: "Mark a chat read as you: <chat>. The senders see read receipts.",
+        discussion: "Marks the chat read up to its newest message, or up to --up-to. Asks first unless --yes."
+    )
+    @Argument(parsing: .allUnrecognized) var chats: [String] = []
+    @Option(name: .customLong("up-to"), help: "Mark read only up to this message id.") var upTo: String?
+    @Flag(help: "Also clear the chat's unread mentions.") var mentions = false
+    @Flag(name: .shortAndLong) var yes = false
+    func validate() throws {
+        guard chats.count == 1, Int64(chats[0]) != nil else { throw ValidationError("give one chat id") }
+        if let upTo { try validateMessageId(upTo) }
+    }
+    func run() async throws {
+        var body: JSONObjectValue = ["mentions": .bool(mentions)]
+        if let upTo { body["up_to_message_id"] = .string(upTo) }
+        try await action("POST", "/v1/chats/\(chats[0])/read", body, yes: yes)
+    }
+}
 struct ChatCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(commandName: "chat", abstract: "Pin, archive, mute or start a chat.", subcommands: [Pin.self, Archive.self, Mute.self, Start.self])
     struct Options: ParsableArguments {

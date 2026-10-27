@@ -10,7 +10,7 @@ public enum ActionInput {
         guard let s = body[key]?.stringValue else { throw APIError.invalidRequest(key, "must be a string") }
         return s
     }
-    static func bool(_ body: JSONObjectValue, _ key: String, default fallback: Bool = false) throws -> Bool {
+    public static func bool(_ body: JSONObjectValue, _ key: String, default fallback: Bool = false) throws -> Bool {
         guard let value = body[key] else { return fallback }
         guard case .bool(let b) = value else { throw APIError.invalidRequest(key, "must be a boolean") }
         return b

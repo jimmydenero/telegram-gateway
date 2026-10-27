@@ -30,6 +30,8 @@ public struct Dependencies: Sendable {
     /// Sends messages (`POST /v1/chats/{chat_id}/messages`). It must see every TDLib update
     /// through `observe` to learn whether a message was sent.
     public var sender: MessageSender
+    /// Marks messages read (`POST /v1/chats/{chat_id}/read`); the only caller of `viewMessages`.
+    public var reader: MessageReader
     public var dispatcher: WebhookDispatcher?
     public var telegram: any TelegramControl
     /// Re-reads config.json (`POST /v1/admin/reload`); nil where reloading is not available.
@@ -58,6 +60,7 @@ public struct Dependencies: Sendable {
         self.translator = translator
         self.mediaCache = mediaCache
         self.sender = sender ?? MessageSender(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter, clock: clock, uploadDirectory: uploadDirectory)
+        self.reader = MessageReader(grants: grants, translator: translator, telegram: telegram, rateLimiter: rateLimiter)
         self.dispatcher = dispatcher
         self.telegram = telegram
         self.reloader = reloader

@@ -90,6 +90,7 @@ struct AppRoutes {
         group.put("/chats/:chat_id/messages/:message_id/reactions") { request, context in try await react(request, context, remove: false) }
         group.delete("/chats/:chat_id/messages/:message_id/reactions") { request, context in try await react(request, context, remove: true) }
         group.post("/chats/:chat_id/messages/:message_id/poll") { request, context in try await vote(request, context) }
+        group.post("/chats/:chat_id/read") { request, context in try await markRead(request, context) }
         group.get("/events") { request, context in try await events(request, context) }
         group.get("/media/:media_id") { request, context in try await media(request, context, head: false) }
         group.head("/media/:media_id") { request, context in try await media(request, context, head: true) }

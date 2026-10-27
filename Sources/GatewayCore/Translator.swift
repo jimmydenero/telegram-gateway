@@ -753,6 +753,20 @@ public actor Translator {
         return result
     }
 
+    /// The chat with its read state as TDLib holds it now, for the answer to the gateway's own
+    /// read. The tracked state is left for the updates to change, so that `chat.read` still
+    /// follows, once.
+    public func chatInfoWithCurrentReadState(_ chatId: Int64) async throws -> ChatInfo {
+        var info = try await chatInfo(chatId)
+        let fresh = RawChatState(chat: try await tdlib.request("getChat", ["chat_id": chatId]).object)
+        var raw = rawStates[chatId] ?? fresh
+        raw.unreadCount = fresh.unreadCount
+        raw.unreadMentionCount = fresh.unreadMentionCount
+        raw.lastReadInbox = fresh.lastReadInbox
+        info.state = raw.state(scopeMuteFor: scopeMuteFor)
+        return info
+    }
+
     /// The chat photo's media index record, if the chat has one (for `GET /v1/media`).
     public func chatPhotoRecord(_ chatId: Int64) async throws -> MediaRecord? {
         let chat = try await tdlib.request("getChat", ["chat_id": chatId]).object

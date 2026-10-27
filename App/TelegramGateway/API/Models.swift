@@ -554,7 +554,7 @@ struct DeliveryList: Decodable, Sendable {
 
 /// The scopes in docs/grants.md, with the one-line meaning shown when approving.
 enum Scope {
-    static let all = ["messages:read", "history:read", "media:read", "chats:read", "messages:send", "chats:manage"]
+    static let all = ["messages:read", "history:read", "media:read", "chats:read", "messages:send", "messages:mark_read", "chats:manage"]
 
     static func explanation(_ scope: String) -> String {
         switch scope {
@@ -563,6 +563,7 @@ enum Scope {
         case "media:read": "Download photos, videos and files"
         case "chats:read": "List the granted chats and learn when coverage changes"
         case "messages:send": "Send messages and files, forward, edit and delete what you sent, react and vote as you"
+        case "messages:mark_read": "Mark messages read as you: senders see read receipts"
         case "chats:manage": "Pin, archive and mute the granted chats, and find chats by username or phone number"
         default: "Unknown scope"
         }
