@@ -51,7 +51,7 @@ How events are fetched is in [api.md](api.md#events). Which events an app may se
 | `occurred_at` | timestamp | When the thing happened. Telegram's own time where Telegram gives one (the message date, the edit date); otherwise the time the gateway learned of it. |
 | `recorded_at` | timestamp | When the gateway appended the event to its log. `recorded_at - occurred_at` is the delivery lag. It can be hours after the Mac was asleep or offline, because the gateway fetches what it missed when it reconnects ([architecture.md](architecture.md#delivery-guarantees)). |
 | `chat` | object | The chat the event belongs to, as a [chat summary](#chat-summary). Present on every event. In `chat.updated` it is the full chat object instead. |
-| payload | | One or two further fields that depend on `type`, listed in the table below. |
+| payload | | Further fields that depend on `type`, listed in the table below. |
 
 Timestamps are RFC 3339 in UTC ([api.md](api.md#timestamps)). Ids are strings
 ([api.md](api.md#identifiers-are-strings)).
@@ -65,11 +65,15 @@ Timestamps are RFC 3339 in UTC ([api.md](api.md#timestamps)). Ids are strings
 | `message.new` | `message` | A message arrives in a monitored chat, including messages the user sends themselves (`is_outgoing: true`), and for each message the gateway finds when catching up after being offline. | `messages:read` |
 | `message.edited` | `message` | A message's text, caption or media is edited. The full message is sent, not a difference. | `messages:read` |
 | `message.deleted` | `message_ids` | Messages are deleted for everyone. | `messages:read` |
-| `chat.updated` | `chat` (full), `changes` | The chat's title, username, photo or member count changes. | `chats:read` |
+| `chat.updated` | `chat` (full), `changes` | The chat's title, username, photo, member count or mute state changes. | `chats:read` |
+| `chat.read` | `unread_count`, `unread_mention_count`, `last_read_inbox_message_id`, `last_read_outbox_message_id`, `is_marked_as_unread` | Read state changes, at most once per chat per second. | `chats:read` |
+| `chat.position` | `is_pinned`, `order`, `is_archived` | Main-list order, pin or archive state changes. | `chats:read` |
+| `message.reactions` | `message_id`, `reactions` | Message reactions change. | `messages:read` |
+| `poll.updated` | `message_id`, `poll` | Poll votes or closure change. | `messages:read` |
 | `monitoring.started` | `monitoring` | The chat enters the monitored set. | `chats:read` |
 | `monitoring.stopped` | `monitoring` | The chat leaves the monitored set. | `chats:read` |
 
-An app whose grant lacks `chats:read` never receives `chat.updated` or `monitoring.*`. It can
+An app whose grant lacks `chats:read` never receives `chat.*` or `monitoring.*`. It can
 still call `GET /v1/me` to read its `effective_chat_ids`.
 
 ### `message.new`
@@ -218,7 +222,7 @@ dropped from TDLib's local cache, produces nothing (in TDLib's terms, the event 
 ### `chat.updated`
 
 `chat` is the full [chat object](api.md#the-chat-object) after the change. `changes` lists
-which of `title`, `username`, `photo` and `member_count` changed. Changes to the member count
+which of `title`, `username`, `photo`, `member_count` and `is_muted` changed. Changes to the member count
 alone are coalesced to at most one `chat.updated` per chat per `05:00`.
 
 ```json
@@ -239,6 +243,48 @@ alone are coalesced to at most one `chat.updated` per chat per `05:00`.
   },
   "changes": ["title", "member_count"]
 }
+```
+
+### `chat.read` and `chat.position`
+
+Both carry the current [chat summary](#chat-summary). `chat.read` reports incoming read
+progress (including reading on another device), outgoing read receipts, unread mentions,
+and the manual unread flag. It observes state only; it never marks messages read.
+The first change emits immediately; changes within the next second emit once at the end
+of that interval with the latest state. A change undone during the interval emits nothing.
+
+`chat.position` emits immediately for pin or archive changes. Pure order changes emit at
+most once per chat per 10 seconds, with a trailing event carrying the latest order. Position
+updates in folders do not affect these fields. Full position lists on last-message and draft
+updates are also handled. Clients can use last-message time for provisional order between
+events. Compare `order` numerically using a 64-bit integer or JavaScript `BigInt`, never
+as a floating-point number or lexicographically. Higher orders appear first.
+
+```json
+{"v":1,"seq":4902,"type":"chat.read","occurred_at":"2026-10-27T14:00:00Z","recorded_at":"2026-10-27T14:00:00Z","chat":{"id":"-1001987654321","type":"supergroup","title":"Acme Support","username":null,"unread_count":2,"unread_mention_count":1,"last_read_inbox_message_id":"1523","last_read_outbox_message_id":"1520","is_marked_as_unread":false,"is_pinned":true,"order":"9221294780217032704","is_archived":false,"is_muted":false},"unread_count":2,"unread_mention_count":1,"last_read_inbox_message_id":"1523","last_read_outbox_message_id":"1520","is_marked_as_unread":false}
+```
+
+```json
+{"v":1,"seq":4903,"type":"chat.position","occurred_at":"2026-10-27T14:00:01Z","recorded_at":"2026-10-27T14:00:01Z","chat":{"id":"-1001987654321","type":"supergroup","title":"Acme Support","username":null,"unread_count":2,"unread_mention_count":1,"last_read_inbox_message_id":"1523","last_read_outbox_message_id":"1520","is_marked_as_unread":false,"is_pinned":false,"order":"0","is_archived":true,"is_muted":false},"is_pinned":false,"order":"0","is_archived":true}
+```
+
+### `message.reactions` and `poll.updated`
+
+Both carry a chat summary and a public `message_id`. Replace the message's entire
+`reactions` array or `poll` object with the payload. An empty reactions array clears all
+reactions. Repeated identical updates are suppressed while cached. View-count-only changes
+are suppressed when the previous reactions are known. Poll content updates produce
+`poll.updated`, rather than `message.edited`. Their timestamps are when the gateway
+learned of the change; Telegram supplies no occurrence time for these updates.
+
+The examples abbreviate the chat summary; its fields are the same as above.
+
+```json
+{"v":1,"seq":4904,"type":"message.reactions","occurred_at":"2026-10-27T14:00:02Z","recorded_at":"2026-10-27T14:00:02Z","chat":{"id":"-1001987654321","type":"supergroup","title":"Acme Support","username":null},"message_id":"1523","reactions":[{"emoji":"👍","custom_emoji_id":null,"count":3,"chosen":true}]}
+```
+
+```json
+{"v":1,"seq":4905,"type":"poll.updated","occurred_at":"2026-10-27T14:00:03Z","recorded_at":"2026-10-27T14:00:03Z","chat":{"id":"-1001987654321","type":"supergroup","title":"Acme Support","username":null},"message_id":"1524","poll":{"question":"Ship Friday?","options":[{"text":"Yes","voter_count":3,"is_chosen":true},{"text":"No","voter_count":1,"is_chosen":false}],"total_voter_count":4,"is_closed":false,"is_anonymous":true,"type":"regular"}}
 ```
 
 ### `monitoring.started` and `monitoring.stopped`
@@ -284,7 +330,7 @@ moment on arrive as `message.new`. Earlier ones are reachable only through
 
 ## Chat summary
 
-The `chat` field on `message.*` and `monitoring.*` events is a summary: enough to route and
+The `chat` field on every event except `chat.updated` is a summary: enough to route and
 label an event without a lookup.
 
 ```json
@@ -297,6 +343,18 @@ label an event without a lookup.
 | `type` | `private`, `basic_group`, `supergroup` or `channel`. A **supergroup** is a large group in which every member can post; a **channel** is a broadcast feed in which only admins post. All four are defined in [api.md](api.md#chat-ids). |
 | `title` | The chat's name. |
 | `username` | The public handle without `@`, or `null` when the chat has none. |
+| `unread_count` | Integer count of unread incoming messages. |
+| `unread_mention_count` | Integer count of unread mentions. |
+| `last_read_inbox_message_id` | Public message id as a string, or `null` if no incoming message has been read. |
+| `last_read_outbox_message_id` | Public message id as a string, or `null` if no outgoing message has been read by the recipient. |
+| `is_marked_as_unread` | Boolean manual unread marker, independent of the counts. |
+| `is_pinned` | Boolean; pinned in the main chat list. Archive and folder pins are not represented. |
+| `order` | Main-list position as a decimal string; higher comes first, `"0"` means absent from the main list. |
+| `is_archived` | Boolean; present in the archive list. |
+| `is_muted` | Boolean; chat notifications muted, including inherited notification-scope settings. |
+
+These new fields are `null` on older stored events where unknown. Current chat endpoints
+use the latest state known from TDLib, even before a coalesced event is emitted.
 
 The full chat object, with member count, photo and `is_monitored`, is in `chat.updated` and
 at `GET /v1/chats` ([api.md](api.md#the-chat-object)).
@@ -316,17 +374,21 @@ The same object appears in `message.new`, in `message.edited`, and in the respon
 | `date` | timestamp | When it was sent: Telegram's server time, in whole seconds. |
 | `edit_date` | timestamp or null | When it was last edited. |
 | `is_outgoing` | boolean | `true` when the user's own account sent it. |
-| `text` | string | The message text, or the caption of a media message; `""` when there is neither. It is plain text: formatting such as bold, italic and code is stripped. |
+| `text` | string | The message text, or the caption of a media message; `""` when there is neither. The characters are plain text; formatting is represented by `entities`. Common service messages have a short English description. |
 | `entities` | array | Spans of `text` with a meaning. See [Entities](#entities). Empty when there are none. |
 | `reply_to` | object or null | `{ "chat_id", "message_id" }` of the message this one replies to. It is usually in the same chat, but a reply can point into another chat (a channel's linked discussion group), hence `chat_id`. The replied-to message is not included; fetch it through history if you need it. |
 | `forward_from` | object or null | Where a forwarded message came from. See [Forward origin](#forward-origin). |
 | `media` | array | Zero or one [media object](#media-object). Telegram allows one file per message; an album is several messages that share a `media_group_id`. The field is an array so that more can be carried later without a breaking change. |
 | `media_group_id` | string or null | Set when the message is part of an album. All messages of the album share the value and arrive as separate `message.new` events. |
 | `link` | string or null | `https://t.me/<username>/<id>` when the chat has a public username, otherwise `null`. |
+| `reactions` | array or null | `{emoji, custom_emoji_id, count, chosen}` entries. One identifier is non-null for emoji/custom emoji; both are null for a paid Star reaction. Custom ids are decimal strings. `chosen` means this account reacted. Empty if none; `null` on older events. |
+| `topic_id` | string or null | Forum topic id from the pinned TDLib schema’s `messageTopicForum.forum_topic_id`; not a discussion-thread id and not shifted like a message id. `null` outside forum topics. |
+| `poll` | object or null | `{question, options: [{text, voter_count, is_chosen}], total_voter_count, is_closed, is_anonymous, type}`. Question and option text are strings, counts integers, flags booleans, and type is `regular` or `quiz`. `null` for non-polls and older events. |
 | `raw_content_type` | string | The name of TDLib's content type for the message: `messageText`, `messagePhoto`, `messagePoll`, `messagePinMessage` and so on, or `"unknown"` if TDLib supplied none. **This field is not stable.** It tells you what kind of message you are looking at when the gateway does not model its content. Its values follow TDLib and can change when the gateway moves to a newer TDLib. Use it for logging and counting, not for logic. |
 
-Messages whose content the gateway does not model (polls, locations, contacts, service
-messages such as "Grace joined the group") still produce a `message.new`. `text` is `""`, or
+Messages whose content the gateway does not model (locations, contacts and uncommon service
+messages) still produce a `message.new`. Common joins, leaves, title/photo changes, pins,
+forum creation and calls get English text; polls carry their content in `poll`. `text` is `""`, or
 the caption if there is one; `media` is empty, or holds the sticker or file; and
 `raw_content_type` names the kind. The gateway never drops a message from a monitored chat.
 
@@ -367,9 +429,16 @@ gateway keeps the ones an app is likely to act on:
 | `text_link` | Text that links elsewhere; the URL is not in the text | `url` |
 | `bot_command` | `/command` | |
 | `email` | An e-mail address | |
+| `bold`, `italic`, `underline`, `strikethrough`, `spoiler`, `code` | Formatting | |
+| `pre` | Preformatted code block | `language` (string or null) |
+| `blockquote` | Quote, including expandable quotes | |
+| `custom_emoji` | Custom emoji | `custom_emoji_id` (decimal string) |
 
-Each entity has an `offset` and a `length`. Entities are sorted by `offset` and do not
-overlap.
+Linked text continues to use `text_link` with `url`, the existing version-1 spelling,
+rather than renaming it to `text_url` and breaking existing consumers.
+
+Each entity has an `offset` and a `length`. Entities are sorted by `offset`, longest first
+at the same offset. Formatting spans can overlap or nest; do not assume disjoint spans.
 
 **Offsets and lengths are in UTF-16 code units.** That is how Telegram defines them, and it
 is how JavaScript strings count, so `text.slice(offset, offset + length)` is correct in
@@ -452,21 +521,24 @@ Format version 1 does not carry the following.
 
 | Not included | Detail |
 |---|---|
-| Reactions and view counts | Emoji reactions on messages, and the view counter of channel posts. |
-| Polls | A poll produces a message with `raw_content_type: "messagePoll"` and empty `text`. Its options and votes are not exposed. |
-| Text formatting | Bold, italic, code, spoiler, underline and strikethrough are stripped; `text` is plain. |
-| Forum topics | Messages in a supergroup with topics carry no topic id. |
-| Read state, pinned flags, scheduled messages | |
+| View counts | Channel view counters. |
+| Scheduled messages and per-message pinned flags | Chat main-list pins are supported. |
 | Comment threads | Nothing beyond `reply_to`. |
-| Locations, contacts and service messages as structured data | They arrive as messages with empty `text` and a `raw_content_type`. |
+| Locations, contacts and service messages as structured data | Common service messages have English `text`; other unmodelled content has empty text. All retain `raw_content_type`. |
 | The user's account | Nothing about it beyond `is_outgoing`. |
-| Private chats and unmonitored chats | This is not a limit of the format. They never leave the gateway ([grants.md](grants.md#what-the-gateway-guarantees)). |
+| Secret chats and unmonitored chats | Secret chats are excluded. App delivery remains restricted to monitored, granted chats; ordinary private chats can be monitored. |
 
 Any of these can be added later as an additive change, described next.
 
 ---
 
 ## Versioning
+
+The mirror additions keep version 1: chat read/position/mute fields (plus the manual unread
+marker), `chat.read`, `chat.position`, `message.reactions`, `poll.updated`, message reactions,
+forum topic ids, poll objects, formatting entity types and English service-message text.
+Older stored events decode without these fields and render unknown additions as `null`.
+The existing `text_link` spelling and UTF-16 offsets remain unchanged.
 
 Every event and every webhook body carries `"v": 1`. The API path (`/v1/…`) and the event
 format version move together.

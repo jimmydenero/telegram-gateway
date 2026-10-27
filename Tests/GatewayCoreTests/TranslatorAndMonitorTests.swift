@@ -29,18 +29,19 @@ import Testing
         #expect(m.sender == Sender(type: .user, id: Fixtures.adaId, displayName: "Ada Lovelace", username: "ada", isBot: false))
         #expect(m.date == Date(timeIntervalSince1970: 1_790_000_000) && m.editDate == nil && !m.isOutgoing)
         #expect(m.text == text)
-        // Subset only, sorted by offset; bold dropped.
+        // Sorted by offset; formatting kept.
         #expect(m.entities == [
-            Entity(type: .mention, offset: 0, length: 8), Entity(type: .url, offset: 49, length: 30), Entity(type: .hashtag, offset: 80, length: 4),
+            Entity(type: .mention, offset: 0, length: 8), Entity(type: .bold, offset: 9, length: 3),
+            Entity(type: .url, offset: 49, length: 30), Entity(type: .hashtag, offset: 80, length: 4),
         ])
         #expect(m.replyTo == ReplyTo(chatId: Fixtures.groupId, messageId: 1519))
         #expect(m.forwardFrom == nil && m.media.isEmpty && m.mediaGroupId == nil)
         #expect(m.link == "https://t.me/acmecommunity/1523" && m.rawContentType == "messageText")
-        #expect(tm.chat.summary == ChatSummary(id: Fixtures.groupId, type: .supergroup, title: "Acme Community", username: "acmecommunity"))
+        #expect(tm.chat.summary == ChatSummary(id: Fixtures.groupId, type: .supergroup, title: "Acme Community", username: "acmecommunity", state: ChatState()))
         let json = m.json
         #expect(json["id"] == "1523" && json["chat_id"] == .string(String(Fixtures.groupId)))
         #expect(json["sender"]?["is_bot"] == false && json["edit_date"] == .null && json["media"] == [])
-        #expect(json.objectValue?.keys == ["id", "chat_id", "sender", "date", "edit_date", "is_outgoing", "text", "entities", "reply_to", "forward_from", "media", "media_group_id", "link", "raw_content_type"])
+        #expect(json.objectValue?.keys == ["id", "chat_id", "sender", "date", "edit_date", "is_outgoing", "text", "entities", "reply_to", "forward_from", "media", "media_group_id", "link", "raw_content_type", "reactions", "topic_id", "poll"])
     }
 
     @Test func photoCaptionBecomesTextAndMediaIsStable() async throws {
@@ -125,10 +126,10 @@ import Testing
         let again = Fixtures.message(chatId: Fixtures.groupId, id: 1523, sender: Fixtures.userSender(Fixtures.adaId), editDate: 1_790_000_200, content: Fixtures.textContent("newer"))
         await core.tdlib.add(message: again)
         #expect(try await core.translator.translate(update: Fixtures.updateMessageEdited(chatId: Fixtures.groupId, id: 1523, editDate: 1_790_000_200)).count == 1)
-        // A content change on a never-edited message (poll votes, link preview) is not an edit.
-        let unedited = Fixtures.message(chatId: Fixtures.groupId, id: 1524, sender: Fixtures.userSender(Fixtures.adaId), content: Fixtures.pollContent())
+        // A content change on a never-edited message (a link preview loading) is not an edit.
+        let unedited = Fixtures.message(chatId: Fixtures.groupId, id: 1524, sender: Fixtures.userSender(Fixtures.adaId), content: Fixtures.textContent("see https://acme.example"))
         await core.tdlib.add(message: unedited)
-        #expect(try await core.translator.translate(update: Fixtures.updateMessageContent(chatId: Fixtures.groupId, id: 1524, content: Fixtures.pollContent())).isEmpty)
+        #expect(try await core.translator.translate(update: Fixtures.updateMessageContent(chatId: Fixtures.groupId, id: 1524, content: Fixtures.textContent("see https://acme.example"))).isEmpty)
     }
 
     @Test func onlyPermanentDeletionsCount() async throws {
@@ -156,11 +157,11 @@ import Testing
     @Test func chatInfoForEveryChatType() async throws {
         let core = try await Core()
         let channel = try await core.translator.chatInfo(Fixtures.channelId)
-        #expect(channel == ChatInfo(id: Fixtures.channelId, type: .channel, title: "Acme Product Updates", username: "acmeupdates", memberCount: 12840, photo: ChatPhoto(mediaId: Identifiers.mediaId(uniqueId: "AQADchatphoto"), width: 640, height: 640)))
+        #expect(channel == ChatInfo(id: Fixtures.channelId, type: .channel, title: "Acme Product Updates", username: "acmeupdates", memberCount: 12840, photo: ChatPhoto(mediaId: Identifiers.mediaId(uniqueId: "AQADchatphoto"), width: 640, height: 640), state: ChatState()))
         let group = try await core.translator.chatInfo(Fixtures.groupId)
         #expect(group.type == .supergroup && group.memberCount == 4200 && group.photo == nil)
         let priv = try await core.translator.chatInfo(Fixtures.privateChatId)
-        #expect(priv == ChatInfo(id: Fixtures.privateChatId, type: .private, title: "Ada Lovelace", username: "ada", memberCount: nil, photo: nil))
+        #expect(priv == ChatInfo(id: Fixtures.privateChatId, type: .private, title: "Ada Lovelace", username: "ada", memberCount: nil, photo: nil, state: ChatState()))
         let basic = try await core.translator.chatInfo(Fixtures.basicGroupChatId)
         #expect(basic.type == .basicGroup && basic.memberCount == 12 && basic.username == nil)
         await core.tdlib.add(chat: Fixtures.secretChat(id: 77))
@@ -169,7 +170,10 @@ import Testing
         let photo = try #require(try await core.translator.chatPhotoRecord(Fixtures.channelId))
         #expect(photo.remoteId == "big-AQADchatphoto" && photo.media.kind == .photo && photo.media.size == 40960)
         #expect(try await core.translator.lastMessageId(Fixtures.channelId) == MessageId.toInternal(411))
-        #expect(channel.json(isMonitored: true).objectValue?.keys == ["id", "type", "title", "username", "member_count", "is_monitored", "photo"])
+        #expect(channel.json(isMonitored: true).objectValue?.keys == [
+            "id", "type", "title", "username", "member_count", "is_monitored", "photo", "unread_count", "unread_mention_count",
+            "last_read_inbox_message_id", "last_read_outbox_message_id", "is_marked_as_unread", "is_pinned", "order", "is_archived", "is_muted",
+        ])
     }
 
     @Test func historyIsNewestFirst() async throws {
