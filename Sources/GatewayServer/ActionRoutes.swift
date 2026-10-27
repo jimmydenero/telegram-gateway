@@ -33,6 +33,19 @@ extension AppRoutes {
         let chat = try await deps.sender.settings(jsonBody(request, context), chat: actionChat(context), as: context.requirePrincipal())
         return json(["chat": chat.json(isMonitored: true)])
     }
+    func markRead(_ request: Request, _ context: GatewayRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        try await deps.grants.require(.messagesMarkRead, principal)
+        let body = try await jsonBody(request, context)
+        var upTo: Int64?
+        if let raw = try body.optionalString("up_to_message_id") {
+            guard let id = Int64(raw), id > 0 else { throw APIError.invalidRequest("up_to_message_id", "must be a message id string") }
+            upTo = id
+        }
+        let mentions = try ActionInput.bool(body, "mentions")
+        let chat = try await deps.reader.markRead(chat: actionChat(context), upTo: upTo, mentions: mentions, as: principal)
+        return json(["chat": chat.json(isMonitored: true)])
+    }
     func startChat(_ request: Request, _ context: GatewayRequestContext) async throws -> Response {
         let chat = try await deps.sender.startChat(jsonBody(request, context), as: context.requirePrincipal(), store: deps.store, monitor: deps.monitor)
         return json(["chat": chat.json(isMonitored: true)], status: .created)

@@ -42,8 +42,9 @@ The gateway puts the login in one place:
   must handle duplicate deliveries.
 - **Read-only unless you allow acting.** The gateway sends, forwards, edits, deletes,
   reacts, votes, or pins, archives or mutes a chat only when the owner does (`tgw`) or an
-  app holds the permission for that chat (`messages:send`, `chats:manage`). It never marks
-  messages as read or sets the Telegram account online.
+  app holds the permission for that chat (`messages:send`, `chats:manage`). It marks
+  messages as read only when a person read them: the owner with `tgw read`, or an app holding
+  `messages:mark_read` when its user opens the chat. It never sets the account online.
 
 - **Linkable to Volgenic.** `tgw link add` connects the gateway out to a Volgenic account,
   which can then sign in, choose chats, read and send through it without reaching your Mac
@@ -58,7 +59,8 @@ An app holding `messages:send` can, in the chats granted to it, send formatted t
 files (photos, videos, documents, voice notes, audio, animations, stickers), forward
 messages, edit and delete the account's own messages, react, and vote in polls. One holding
 `chats:manage` can pin, archive and mute those chats, and look up a chat by username or
-phone number. The owner can do the same with `tgw`, which asks before acting unless given
+phone number. One holding `messages:mark_read` can mark a chat read when its user opens it,
+so the senders see read receipts, as in the Telegram app. The owner can do the same with `tgw`, which asks before acting unless given
 `--yes`. See [docs/api.md](docs/api.md#message-and-chat-actions). The actions are new and
 have not yet been tried against a live Telegram account.
 
@@ -165,8 +167,9 @@ consumer.
 
 ## What it does not do
 
-- **Mark messages as read, appear online or show "typing…".** No action does, and nothing
-  joins or leaves a group or channel.
+- **Appear online or show "typing…".** No action does, and nothing joins or leaves a group
+  or channel. Messages are marked read only when someone asks to, never by the gateway on
+  its own.
 - **Analyze anything.** No classification, sentiment or search. Apps do that.
 - **Serve other machines directly.** The API listens on `127.0.0.1` only. An app running
   elsewhere can still receive events through webhooks, and a Volgenic account the owner

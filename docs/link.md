@@ -20,8 +20,10 @@ Durations are written `mm:ss`; values under a minute in seconds, for example `30
 A link acts with the admin token, so it can do everything the menu bar app can, except see
 or change secrets: sign in and out of Telegram, change the monitored set, approve and revoke
 apps, read every monitored chat's events, history and media, and **send messages as the
-user to every monitored chat**. Link only to a Volgenic account that is yours. The gateway
-still never marks anything as read and never makes the account appear online, whoever asks.
+user to every monitored chat**. Link only to a Volgenic account that is yours. A link can also
+**mark chats read** (`POST /v1/chats/{chat_id}/read`): Volgenic does this when the person
+opens a chat there, and the senders then see read receipts, as in the Telegram app. The
+gateway still never makes the account appear online, whoever asks.
 
 ## Pairing
 
@@ -308,3 +310,12 @@ that for the frame around it. Response bodies keep their 20 MiB limit.
 
 The results come back through the `subscribe` stream as the ordinary events, once each.
 None of this has been run against a real Volgenic server or a live account.
+
+## Marking read over the link
+
+When the person opens a chat in Volgenic, Volgenic sends a `request` frame for
+`POST /v1/chats/{chat_id}/read` ([api.md](api.md#marking-as-read)), with an empty body or
+`{"up_to_message_id": "…", "mentions": true}`. The answer is the chat with its new unread
+counts, and the change also arrives in the `subscribe` stream as `chat.read`. Over the link
+this runs with the admin token's authority, so it works in any monitored chat, within the
+limit of 60 reads per minute. Not yet run against a real Volgenic server.

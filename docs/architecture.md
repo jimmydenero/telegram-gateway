@@ -215,9 +215,13 @@ grant takes effect immediately on HTTP, WebSocket and webhooks.
   voting, and pinning, archiving and muting chats work the same way: on request only,
   through `MessageSender`, never on the gateway's own initiative
   ([api.md](api.md#message-and-chat-actions)).
-- **It does not mark anything as read and does not appear online.** It never calls the TDLib
-  functions that count as viewing a chat, and it tells Telegram the account is offline. The
-  user's own Telegram apps behave as if the gateway did not exist.
+- **It marks messages read only when a person read them, and never appears online.** A
+  read happens only on request: from the user with `tgw read` or through the Volgenic
+  account they linked, or from an app the user granted `messages:mark_read` whose user
+  opened the chat. `MessageReader` is the one place that calls `viewMessages`; it passes
+  `force_read`, which marks messages read without opening the chat, so the gateway never
+  calls `openChat` and tells Telegram the account is offline. When nothing asks for a read,
+  the user's own Telegram apps behave as if the gateway did not exist.
 - **It does not join or leave chats**, and it never creates an account.
 - **It does no analysis.** No classification, search or statistics: that is what apps are for.
 - **It serves one Telegram account** per data directory.
