@@ -13,8 +13,10 @@ struct WordingTests {
         #expect(Permission.name("chats:read") == "Chat names and details")
         #expect(Permission.name("messages:send") == "Send and react")
         #expect(Permission.name("chats:manage") == "Manage chats")
+        #expect(Permission.name("messages:mark_read") == "Mark as read")
+        #expect(Permission.meaning("messages:mark_read").contains("read receipts"))
         #expect(Permission.meaning("messages:send").contains("as you"))
-        #expect(Permission.reading(["messages:send", "chats:manage", "chats:read", "messages:read"]) == ["messages:read", "chats:read"])
+        #expect(Permission.reading(["messages:send", "messages:mark_read", "chats:manage", "chats:read", "messages:read"]) == ["messages:read", "chats:read"])
         // A scope this version does not know is shown as it is rather than hidden.
         #expect(Permission.name("reactions:read") == "reactions:read")
         for scope in Permission.order {

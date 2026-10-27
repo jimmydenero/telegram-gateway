@@ -16,7 +16,7 @@ enum Tone: Equatable, Sendable {
 /// A **scope** (docs/grants.md) in plain words. The identifier appears only as a tooltip.
 enum Permission {
     /// Canonical display order, whatever order the API returned.
-    static let order = ["messages:read", "history:read", "media:read", "chats:read", "messages:send", "chats:manage"]
+    static let order = ["messages:read", "history:read", "media:read", "chats:read", "messages:send", "messages:mark_read", "chats:manage"]
 
     /// "New messages"
     static func name(_ scope: String) -> String {
@@ -26,6 +26,7 @@ enum Permission {
         case "media:read": "Photos and files"
         case "chats:read": "Chat names and details"
         case "messages:send": "Send and react"
+        case "messages:mark_read": "Mark as read"
         case "chats:manage": "Manage chats"
         default: scope
         }
@@ -39,6 +40,7 @@ enum Permission {
         case "media:read": "Download what is attached to those messages"
         case "chats:read": "Titles, usernames and member counts"
         case "messages:send": "Sends messages and files as you, forwards, edits and deletes what you sent, reacts and votes; people see it as you"
+        case "messages:mark_read": "Mark messages read as you: senders see read receipts"
         case "chats:manage": "Pins, archives and mutes these chats, and finds chats by username or phone number"
         default: "Not known to this version of the app"
         }
@@ -54,7 +56,7 @@ enum Permission {
 
     /// The permissions that act as the user instead of reading. Shown apart, under
     /// "Can act as you", so they are never mistaken for more kinds of reading.
-    static let actions = ["messages:send", "chats:manage"]
+    static let actions = ["messages:send", "messages:mark_read", "chats:manage"]
 
     /// The reading permissions among `scopes`, in display order.
     static func reading(_ scopes: [String]) -> [String] {
