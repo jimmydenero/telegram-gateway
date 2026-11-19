@@ -88,7 +88,7 @@ Authorization: Bearer vgl_…
 | The open socket is closed with code `4401` (revoked) | The same. |
 | Anything else fails: no network, DNS, TLS, another HTTP status, a dropped connection | Tries again after a delay that starts at `1s` and doubles up to `01:00`, each randomised by up to 20% either way. A connection that stayed open for `30s` resets the delay to `1s`. |
 | `tgw link add` for the link, or any reload (`tgw daemon reload`) | A link stopped at `unauthorized` tries again; a running link whose token did not change is left alone. |
-| `tgw link remove`, or the gateway shutting down | The socket is closed with code `1001`. |
+| `tgw link remove`, or the gateway shutting down | The socket is closed with code `1001` at once. Requests still running are not waited for: they finish on their own (a send still goes out, and its outcome is kept under its `idempotency_key`), and their answers are dropped. |
 
 **Keepalive.** Volgenic pings every `30s`, and the gateway answers each ping with a pong.
 The gateway also pings every `30s` itself, and drops the connection (then reconnects) when
@@ -156,8 +156,10 @@ through the same authentication, rate limits and error handling that `tgw` meets
 - Requests count against the admin token's rate limits ([api.md](api.md#rate-limits)),
   which the menu bar app and `tgw` share: 600 per minute in all, 60 history reads and 20
   sends per minute.
-- Requests run concurrently and responses arrive in any order; `id` correlates them. The
-  gateway never gives up on a request itself (sending waits up to `30s` for Telegram, media
+- Requests run concurrently and responses arrive in any order; `id` correlates them. At
+  most 8 run at once on a connection; a request beyond that is answered at once with
+  `429 rate_limited` (`retry_after: 1`) and does not run, so ask again after an answer
+  arrives. The gateway never gives up on a request itself (sending waits up to `30s` for Telegram, media
   up to `30s` for the download); a request unanswered after `01:00` is Volgenic's to time
   out.
 - **Sends carry an `idempotency_key`.** When the socket drops, the answers to the requests

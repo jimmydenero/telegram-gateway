@@ -223,6 +223,7 @@ public actor GatewayLinkClient {
         }
 
         let (frames, framesIn) = AsyncStream.makeStream(of: JSONValue.self)
+        let slots = RequestSlots(limit: LinkPolicy.maxConcurrentRequests)
         let ending = Mutex<LinkTransportError?>(nil)
         let handler = self.handler
         let eventLog = self.eventLog
@@ -280,7 +281,19 @@ public actor GatewayLinkClient {
             for await frame in frames {
                 switch frame["type"]?.stringValue {
                 case "request":
-                    group.addTask {
+                    guard slots.take() else {
+                        let busy = APIError.rateLimited(retryAfter: 1)
+                        let reply = GatewayLinkClient.requestId(frame).map { LinkFrames.response(id: $0, .error(busy)) }
+                            ?? LinkFrames.error(code: "invalid_request", message: "A request needs an id.")
+                        try? await sender.send(reply)
+                        continue
+                    }
+                    // Not a child of this connection: when the connection ends, or the link is
+                    // stopped, nothing waits for requests still running (a send waits up to
+                    // 30s for Telegram). They finish on their own; a send's outcome is kept
+                    // under its idempotency_key, and an answer to a closed socket is dropped.
+                    Task {
+                        defer { slots.give() }
                         let reply = await GatewayLinkClient.answer(frame, handler: handler, logger: logger)
                         if let reply { try? await sender.send(reply) }
                     }
@@ -314,9 +327,14 @@ public actor GatewayLinkClient {
         return AuthSnapshot(state: state, account: state == "ready" ? await telegram.account() : nil)
     }
 
+    /// A request frame's `id`: a string, or a number as written.
+    static func requestId(_ frame: JSONValue) -> String? {
+        frame["id"]?.stringValue ?? frame["id"].flatMap({ $0.doubleValue != nil ? $0.serializedString() : nil })
+    }
+
     /// Runs one `request` frame; nil when the frame has no id to answer to.
     static func answer(_ frame: JSONValue, handler: any LinkRequestHandling, logger: Logger) async -> JSONValue? {
-        guard let id = frame["id"]?.stringValue ?? frame["id"].flatMap({ $0.doubleValue != nil ? $0.serializedString() : nil }) else {
+        guard let id = requestId(frame) else {
             return LinkFrames.error(code: "invalid_request", message: "A request needs an id.")
         }
         switch LinkFrames.request(frame) {
@@ -363,6 +381,31 @@ public actor GatewayLinkClient {
             return
         }
     }
+}
+
+/// Counts the requests a connection is running, up to `limit`.
+final class RequestSlots: Sendable {
+    private let limit: Int
+    private let used = Mutex(0)
+
+    init(limit: Int) {
+        self.limit = limit
+    }
+
+    /// Takes a slot; false when all are in use.
+    func take() -> Bool {
+        used.withLock { count in
+            guard count < limit else { return false }
+            count += 1
+            return true
+        }
+    }
+
+    func give() {
+        used.withLock { $0 = max(0, $0 - 1) }
+    }
+
+    var inUse: Int { used.withLock { $0 } }
 }
 
 /// Writes frames one at a time, in the order they were handed over.

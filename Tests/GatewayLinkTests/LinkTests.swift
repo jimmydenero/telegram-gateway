@@ -54,11 +54,11 @@ struct Gateway {
         try client(baseURL: volgenic.baseURL, token: token)
     }
 
-    func client(baseURL: String, token: String = Gateway.linkToken) throws -> GatewayLinkClient {
+    func client(baseURL: String, token: String = Gateway.linkToken, handler: (any LinkRequestHandling)? = nil) throws -> GatewayLinkClient {
         var logger = Logger(label: "link")
         logger.logLevel = .critical
         return try GatewayLinkClient(
-            baseURL: baseURL, token: token, transport: URLSessionLinkTransport(), handler: api, eventLog: deps.eventLog,
+            baseURL: baseURL, token: token, transport: URLSessionLinkTransport(), handler: handler ?? api, eventLog: deps.eventLog,
             telegram: telegram, version: "0.1.0", timing: Gateway.timing, logger: logger
         )
     }
@@ -72,6 +72,24 @@ struct Gateway {
             media: [], mediaGroupId: nil, link: nil, rawContentType: "messageText"
         )
         return try await deps.eventLog.append(Event(type: .messageNew, occurredAt: clock.now, recordedAt: clock.now, chat: chat, payload: .message(message)))
+    }
+}
+
+/// A request handler that holds every request until released, like a send waiting for
+/// Telegram.
+actor HeldHandler: LinkRequestHandling {
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private(set) var started = 0
+
+    func perform(_ request: LinkHTTPRequest, maxBodyBytes: Int) async -> LinkHTTPResponse {
+        started += 1
+        await withCheckedContinuation { waiting.append($0) }
+        return LinkHTTPResponse(status: 200, contentType: "application/json; charset=utf-8", body: Data("{}".utf8))
+    }
+
+    func releaseAll() {
+        for continuation in waiting { continuation.resume() }
+        waiting.removeAll()
     }
 }
 
@@ -297,6 +315,61 @@ struct LinkTests {
         #expect(result.json["links"]?["unchanged"] == [.string("https://other.example")])
         #expect(result.json(withLinks: false)["links"] == nil)
         #expect(result.json(withLinks: false)["reloaded"] == true)
+    }
+
+    /// The most request frames a connection runs at once is bounded; one more is answered
+    /// 429 at once without running, and the slots come back when requests finish (review nit).
+    @Test func requestsBeyondTheBoundAreRefusedAtOnce() async throws {
+        let gateway = try await Gateway()
+        let held = HeldHandler()
+        let volgenic = try await FakeVolgenic(token: Gateway.linkToken)
+        let client = try gateway.client(baseURL: volgenic.baseURL, handler: held)
+        await client.start()
+        let connection = try await volgenic.connection(0)
+        _ = try await connection.next(ofType: "hello")
+        let limit = LinkPolicy.maxConcurrentRequests
+        for i in 0..<limit {
+            try await connection.send(["type": "request", "id": .string("r-\(i)"), "method": "GET", "path": "/v1/admin/auth"])
+        }
+        try await eventually("all \(limit) running") { await held.started == limit }
+        try await connection.send(["type": "request", "id": "one-more", "method": "GET", "path": "/v1/admin/auth"])
+        let refused = try await connection.next(ofType: "response")
+        #expect(refused["id"] == "one-more")
+        #expect(refused["status"] == 429)
+        #expect(refused["body"]?["error"]?["code"] == "rate_limited")
+        #expect(await held.started == limit)
+
+        await held.releaseAll()
+        var answered: Set<String> = []
+        for _ in 0..<limit { answered.insert(try await connection.next(ofType: "response")["id"]?.stringValue ?? "") }
+        #expect(answered == Set((0..<limit).map { "r-\($0)" }))
+        try await connection.send(["type": "request", "id": "after", "method": "GET", "path": "/v1/admin/auth"])
+        try await eventually("a freed slot is used") { await held.started == limit + 1 }
+        await held.releaseAll()
+        #expect(try await connection.next(ofType: "response")["id"] == "after")
+        await client.stop()
+        await volgenic.stop()
+    }
+
+    /// Stopping a link (tgw link remove, shutdown) closes it at once, even with a request
+    /// that is still running; it used to wait for every request in flight (review nit).
+    @Test func stoppingDoesNotWaitForRequestsInFlight() async throws {
+        let gateway = try await Gateway()
+        let held = HeldHandler()
+        let volgenic = try await FakeVolgenic(token: Gateway.linkToken)
+        let client = try gateway.client(baseURL: volgenic.baseURL, handler: held)
+        await client.start()
+        let connection = try await volgenic.connection(0)
+        _ = try await connection.next(ofType: "hello")
+        try await connection.send(["type": "request", "id": "slow", "method": "POST", "path": "/v1/chats/-1001987654321/messages", "body": ["text": "hi"]])
+        try await eventually("the request is running") { await held.started == 1 }
+        let began = ContinuousClock.now
+        await client.stop()
+        #expect(ContinuousClock.now - began < .seconds(2))
+        #expect(await client.currentStatus().state == .stopped)
+        try await eventually("Volgenic sees the close") { try await connection.isClosed }
+        await held.releaseAll()
+        await volgenic.stop()
     }
 
     @Test func largeAndBinaryBodies() async throws {

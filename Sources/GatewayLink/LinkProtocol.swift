@@ -73,6 +73,11 @@ public enum LinkPolicy {
     /// The largest response body a `response` frame carries, before base64.
     public static let maxBodyBytes = 20 * 1024 * 1024
 
+    /// The most `request` frames one connection runs at once. A request beyond that is
+    /// answered at once with `429 rate_limited` and does not run, so a burst of large frames
+    /// (a send with a file is up to about 28 MB) cannot pile up in memory.
+    public static let maxConcurrentRequests = 8
+
     static let methods: Set<String> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
 
     /// Every call a link may make, and nothing else: the calls in docs/link.md "What Volgenic
