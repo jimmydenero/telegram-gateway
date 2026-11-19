@@ -91,9 +91,14 @@ import Testing
         // All reactions removed is a change.
         let none = Fixtures.interactionInfo(reactions: [], viewCount: 951)
         #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 412, info: none)).count == 1)
-        // After restart or memo eviction, a client may still have old reactions. Clear them.
-        #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 9999, info: none)) == [.messageReactions(chatId: Fixtures.channelId, messageId: 9999, [])])
+        // A message the translator has not seen, updated for its view count with no reactions,
+        // is not a reactions change: no empty message.reactions (review nit).
         #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 9999, info: none)).isEmpty)
+        #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 9999, info: none)).isEmpty)
+        // Its first reaction is an event, and so is removing it again.
+        let one = Fixtures.interactionInfo(reactions: [("🔥", nil, 1, false)], viewCount: 952)
+        #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 9999, info: one)).count == 1)
+        #expect(try await core.translator.translate(update: Fixtures.updateMessageInteractionInfo(chatId: Fixtures.channelId, id: 9999, info: none)) == [.messageReactions(chatId: Fixtures.channelId, messageId: 9999, [])])
     }
 
     @Test func pollsAndVotes() async throws {

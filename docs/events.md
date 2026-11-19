@@ -276,7 +276,10 @@ as a floating-point number or lexicographically. Higher orders appear first.
 Both carry a chat summary and a public `message_id`. Replace the message's entire
 `reactions` array or `poll` object with the payload. An empty reactions array clears all
 reactions. Repeated identical updates are suppressed while cached. View-count-only changes
-are suppressed when the previous reactions are known. Poll content updates produce
+are suppressed when the previous reactions are known, and also for a message the gateway
+has not seen since it started that has no reactions. In the rare case that a message's last
+reactions are removed after a gateway restart, before the gateway saw the message again, no
+event is sent; reading the message's history shows its current reactions. Poll content updates produce
 `poll.updated`, rather than `message.edited`. Their timestamps are when the gateway
 learned of the change; Telegram supplies no occurrence time for these updates.
 

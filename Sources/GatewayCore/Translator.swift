@@ -211,8 +211,12 @@ public actor Translator {
             let publicId = MessageId.toPublic(messageId)
             let key = MessageKey(chatId: chatId, messageId: publicId)
             let previous = lastReactions[key]
-            if previous == reactions { return [] }
             lastReactions[key] = reactions
+            if previous == reactions { return [] }
+            // A message not seen since the gateway started (or since the memo forgot it) with no
+            // reactions: nothing to report. Otherwise every view-count update of every channel
+            // post would add an empty message.reactions after each restart.
+            if previous == nil, reactions.isEmpty { return [] }
             return [.messageReactions(chatId: chatId, messageId: publicId, reactions)]
 
         case "updateNewChat":
