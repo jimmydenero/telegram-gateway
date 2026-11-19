@@ -146,6 +146,85 @@ import Testing
         #expect(await s.sender.waitingCount == 0)
     }
 
+    // MARK: idempotency_key (review 5)
+
+    func keyed(_ text: String, key: String = "k-1") -> JSONObjectValue {
+        ["text": .string(text), "idempotency_key": .string(key)]
+    }
+
+    /// A send repeated with the same key while the first is still waiting for Telegram joins
+    /// it; once it is done, a repeat answers with its message. Only one message is sent, and
+    /// the repeats use none of the send budget.
+    @Test func aRepeatedKeySendsOnce() async throws {
+        let s = try await Setup()
+        let (grant, _) = try await s.core.makeGrant(scopes: [.messagesSend])
+        let sender = s.sender
+        let body = keyed("Thanks, fixed in 2.4.1")
+        let first = Task { try await sender.send(body, to: Fixtures.channelId, as: .app(grant)) }
+        try await s.core.clock.waitForSleepers(1)
+        let joined = Task { try await sender.send(body, to: Fixtures.channelId, as: .app(grant)) }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(await s.sendRequests().count == 1)
+
+        let final = Fixtures.sentMessage(chatId: Fixtures.channelId, id: 1530, text: "Thanks, fixed in 2.4.1")
+        await s.sender.observe(Fixtures.updateMessageSendSucceeded(final, oldMessageId: Fixtures.localMessageId(1)))
+        #expect(try await first.value.id == 1530)
+        #expect(try await joined.value.id == 1530)
+        // The same body in another key order is the same request.
+        let reordered: JSONObjectValue = ["idempotency_key": "k-1", "text": "Thanks, fixed in 2.4.1"]
+        #expect(try await s.sender.send(reordered, to: Fixtures.channelId, as: .app(grant)).id == 1530)
+        #expect(await s.sendRequests().count == 1)
+        // The key never reaches Telegram.
+        #expect(await s.sendRequests().first?.object("input_message_content")?.object("text")?.string("text") == "Thanks, fixed in 2.4.1")
+        for _ in 0..<(MessageSender.sendsPerMinute + 5) {
+            _ = try await s.sender.send(body, to: Fixtures.channelId, as: .app(grant))
+        }
+        #expect(await s.sendRequests().count == 1)
+    }
+
+    @Test func aKeyIsPerPrincipalChatAndBody() async throws {
+        let s = try await Setup()
+        let (grant, _) = try await s.core.makeGrant(scopes: [.messagesSend])
+        await s.sender.observe(Fixtures.updateMessageSendSucceeded(Fixtures.sentMessage(chatId: Fixtures.channelId, id: 1530, text: "a"), oldMessageId: Fixtures.localMessageId(1)))
+        _ = try await s.sender.send(keyed("a"), to: Fixtures.channelId, as: .app(grant))
+        let reused = await apiError { try await s.sender.send(keyed("b"), to: Fixtures.channelId, as: .app(grant)) }
+        #expect(reused?.status == 409 && reused?.code == "idempotency_key_reused")
+        // Another principal with the same key is another send.
+        await s.sender.observe(Fixtures.updateMessageSendSucceeded(Fixtures.sentMessage(chatId: Fixtures.channelId, id: 1531, text: "a"), oldMessageId: Fixtures.localMessageId(2)))
+        #expect(try await s.sender.send(keyed("a"), to: Fixtures.channelId, as: .admin).id == 1531)
+        #expect(await s.sendRequests().count == 2)
+        let invalid = await apiError { try await s.sender.send(["text": "a", "idempotency_key": ""], to: Fixtures.channelId, as: .admin) }
+        #expect(invalid?.code == "invalid_request" && invalid?.details["field"] == "idempotency_key")
+        let tooLong = await apiError { try await s.sender.send(["text": "a", "idempotency_key": .string(String(repeating: "x", count: 129))], to: Fixtures.channelId, as: .admin) }
+        #expect(tooLong?.details["field"] == "idempotency_key")
+        // After the window the key is forgotten.
+        s.core.clock.advance(by: .seconds(Int64(MessageSender.idempotencyWindow) + 1))
+        await s.sender.observe(Fixtures.updateMessageSendSucceeded(Fixtures.sentMessage(chatId: Fixtures.channelId, id: 1532, text: "b"), oldMessageId: Fixtures.localMessageId(3)))
+        #expect(try await s.sender.send(keyed("b"), to: Fixtures.channelId, as: .app(grant)).id == 1532)
+        #expect(await s.sender.rememberedKeyCount == 1)
+    }
+
+    /// Telegram refusing a send means nothing went out, so the key may be used again; a
+    /// timeout means it may still go out, so a repeat answers 504 again and sends nothing.
+    @Test func aFailedSendForgetsItsKeyButATimeoutKeepsIt() async throws {
+        let s = try await Setup()
+        let (grant, _) = try await s.core.makeGrant(scopes: [.messagesSend])
+        let sender = s.sender
+        let refused = Task { try await sender.send(keyed("hi"), to: Fixtures.channelId, as: .app(grant)) }
+        try await s.core.clock.waitForSleepers(1)
+        let failed = Fixtures.pendingMessage(chatId: Fixtures.channelId, localId: Fixtures.localMessageId(1), text: "hi")
+        await s.sender.observe(Fixtures.updateMessageSendFailed(failed, oldMessageId: Fixtures.localMessageId(1), code: 403, error: "CHAT_WRITE_FORBIDDEN"))
+        #expect(await apiError { try await refused.value }?.code == "send_failed")
+
+        let timedOut = Task { try await sender.send(keyed("hi"), to: Fixtures.channelId, as: .app(grant)) }
+        try await s.core.clock.waitForSleepers(1)
+        #expect(await s.sendRequests().count == 2)
+        s.core.clock.advance(by: .seconds(31))
+        #expect(await apiError { try await timedOut.value }?.code == "send_timeout")
+        #expect(await apiError { try await s.sender.send(keyed("hi"), to: Fixtures.channelId, as: .app(grant)) }?.code == "send_timeout")
+        #expect(await s.sendRequests().count == 2)
+    }
+
     @Test func revokingStopsSending() async throws {
         let s = try await Setup()
         let (grant, _) = try await s.core.makeGrant(scopes: [.messagesSend])

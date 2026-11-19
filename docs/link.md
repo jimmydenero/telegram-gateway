@@ -156,6 +156,14 @@ through the same authentication, rate limits and error handling that `tgw` meets
   gateway never gives up on a request itself (sending waits up to `30s` for Telegram, media
   up to `30s` for the download); a request unanswered after `01:00` is Volgenic's to time
   out.
+- **Sends carry an `idempotency_key`.** When the socket drops, the answers to the requests
+  still running are lost, but a message may already have gone out. Volgenic gives every
+  `POST /v1/chats/{chat_id}/messages` its own `idempotency_key` (for example the id of the
+  outgoing message in Volgenic) and, if it retries after a timeout or a reconnect, sends the
+  same request with the same key: the gateway sends the message at most once and answers the
+  retry with it ([api.md](api.md#repeating-a-send)). Volgenic never retries a send without a
+  key. The other actions have no key: Volgenic does not retry a forward, and checks the
+  event stream before repeating an edit, deletion or reaction.
 
 **What a link may call.** Exactly the calls in the table below, by method and path, and
 nothing else. Anything not in it answers `403` with
@@ -191,7 +199,7 @@ These, specified in [api.md](api.md), and nothing else:
 | Chats and the monitored set | `GET /v1/admin/chats` (with `?all=true` the whole chat list), `GET /v1/admin/folders`, `GET` and `PUT /v1/admin/monitored-chats` |
 | History | `GET /v1/chats/{chat_id}/messages?before=…&limit=…` |
 | Media | `GET /v1/media/{media_id}` |
-| Sending | `POST /v1/chats/{chat_id}/messages` with `{"text", "reply_to"}`: the admin token may send to any monitored chat |
+| Sending | `POST /v1/chats/{chat_id}/messages` with `{"text", "reply_to", "idempotency_key"}`: the admin token may send to any monitored chat |
 | Actions ([below](#actions-over-the-link)) | `POST /v1/chats/{chat_id}/forward`, `PATCH /v1/chats/{chat_id}/messages/{message_id}`, `DELETE /v1/chats/{chat_id}/messages`, `PUT` and `DELETE /v1/chats/{chat_id}/messages/{message_id}/reactions`, `POST /v1/chats/{chat_id}/messages/{message_id}/poll`, `PATCH /v1/chats/{chat_id}`, `POST /v1/chats` |
 | Marking read ([below](#marking-read-over-the-link)) | `POST /v1/chats/{chat_id}/read` |
 | State | `GET /v1/admin/status` (without its `links` list over a link), `GET /v1/health` |

@@ -1,5 +1,6 @@
 import Foundation
 import GatewayCore
+import GatewayLink
 import GatewayServer
 import GatewayTestSupport
 import HTTPTypes
@@ -62,6 +63,26 @@ import Testing
             #expect(unmonitored.status == 403 && unmonitored.code == "chat_not_granted")
             let me = try await client.call(.get, "/v1/me", token: App.adminToken)
             #expect(me.json["grant"]?["scopes"]?.arrayValue?.contains("messages:send") == true)
+        }
+        #expect(await app.tdlib.requests(ofType: "sendMessage").count == 1)
+    }
+
+    /// A send over the link that Volgenic repeats with the same idempotency_key, after the
+    /// socket dropped before the answer came back, is answered with the first message and
+    /// sends nothing more (review 5).
+    @Test func aSendRepeatedOverTheLinkWithItsKeyIsSentOnce() async throws {
+        let app = try await App()
+        try await app.monitorDefaults()
+        _ = await succeed(app, send: 1, id: 1530, text: "On my way")
+        let api = InProcessAPI(deps: app.deps, adminToken: App.adminToken)
+        let request = LinkHTTPRequest(
+            method: "POST", path: "/v1/chats/\(Fixtures.channelId)/messages",
+            body: JSONValue.object(["text": "On my way", "idempotency_key": "vg-msg-7f3a"]).serialized()
+        )
+        for _ in 0..<3 {
+            let response = await api.perform(request, maxBodyBytes: LinkPolicy.maxBodyBytes)
+            #expect(response.status == 201)
+            #expect(try JSONValue.parse(response.body)["message"]?["id"] == "1530")
         }
         #expect(await app.tdlib.requests(ofType: "sendMessage").count == 1)
     }

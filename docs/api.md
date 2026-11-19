@@ -260,6 +260,7 @@ empty, whose keys are listed per code below.
 | 409 | `webhook_not_paused` | Resume on a webhook that is not paused. | `state` |
 | 409 | `cursor_behind` | A prune would delete events a webhook has not delivered yet ([Admin: pruning](#admin-pruning)). | `grant_id` |
 | 409 | `reload_in_progress` | A reload was requested while another one is still running ([Admin: reload](#admin-reload)). | |
+| 409 | `idempotency_key_reused` | A send repeated an `idempotency_key` with a different body ([Repeating a send](#repeating-a-send)). | |
 | 410 | `history_pruned` | `since` points below the oldest retained event ([Retention](#retention)). | `oldest_seq` |
 | 410 | `media_gone` | Telegram can no longer supply the file (the message was deleted, or Telegram expired the file). | `media_id` |
 | 413 | `payload_too_large` | Request body over 64 KiB, or over 28,027,564 bytes for a send with a file ([Sending files](#sending-files)). | |
@@ -846,6 +847,7 @@ Content-Type: application/json
 | `entities` | no | Formatting: bold, links, mentions and so on, as an array of [formatting entities](events.md#entities) over `text` (or over the caption when sending media). At most 100. |
 | `media` | no | A file to send: a photo, video, document, voice note, audio file, animation or sticker. See [Sending files](#sending-files). |
 | `silent` | no | `true` sends the message without a notification sound for the people in the chat. Default `false`. |
+| `idempotency_key` | no | A string of 1 to 128 bytes that you choose for this one message, for example a UUID, and send again unchanged if you repeat the request. See [Repeating a send](#repeating-a-send). |
 
 The gateway hands the message to Telegram and waits for Telegram to confirm that its servers
 stored it, up to `30s`. Response `201 Created` with the message as Telegram stored it, with
@@ -891,10 +893,33 @@ phone, including the app that sent it: deduplicate on the message id if that mat
 | The gateway is not signed in, or the connection to Telegram is down | `503 not_logged_in`, `503 telegram_unavailable` |
 | Telegram refuses the message: the account may not write in the chat, is restricted, the reply target is invalid | `502 send_failed`; `details.reason` is Telegram's text (for example `CHAT_WRITE_FORBIDDEN`) and `details.telegram_code` its number |
 | Telegram does not confirm within `30s` | `504 send_timeout` |
+| `idempotency_key` empty, longer than 128 bytes or not a string | `400 invalid_request` with `details.field: "idempotency_key"` |
+| `idempotency_key` already used for a different message to this chat | `409 idempotency_key_reused` |
 
 **After a timeout the message may still go out.** The gateway has handed it to Telegram and
 cannot take it back. If it is sent later, it appears in the event stream as `message.new`.
 Before sending again, check the stream for it, or you may post the same text twice.
+
+### Repeating a send
+
+A connection can drop after the gateway sent a message and before its answer arrived; the
+message went out, but the app cannot tell. With an `idempotency_key`, repeating the same
+request is safe: the gateway sends the message at most once.
+
+- The gateway remembers each key for `24:00:00` (24 hours), per token and chat. A repeat
+  with the same key and the same body sends nothing and answers as the first did: with the
+  message (`201`), or, while the first is still waiting for Telegram, as soon as it has an
+  answer. A repeat uses none of the send rate limit.
+- If the first answered `504 send_timeout`, the message may still go out, so repeats answer
+  `504 send_timeout` too and send nothing. Check the event stream for it.
+- If the first failed in any other way (`400`, `403`, `429`, `502`, `503`), nothing was sent,
+  and the key is forgotten: the repeat is a new attempt.
+- The same key with a different body (other text, another reply target, another file) is
+  `409 idempotency_key_reused`. Use a new key for each new message.
+- Keys are compared exactly; the body is compared regardless of the order of its fields.
+
+Without a key the gateway cannot recognise a repeat, and repeating a send may post the
+message twice.
 
 The gateway does not retry a send, never marks the chat as read, and never makes the account
 appear online to send. Telegram itself counts sending as activity of the account; how it

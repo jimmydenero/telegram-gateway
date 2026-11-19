@@ -98,6 +98,8 @@ public struct APIError: Error, Sendable, Equatable, CustomStringConvertible {
         APIError(status: 410, code: "media_gone", message: "Telegram can no longer serve this file.", details: ["media_id": .string(mediaId)])
     }
 
+    public static let idempotencyKeyReused = APIError(status: 409, code: "idempotency_key_reused", message: "This idempotency_key was used for a different message to this chat; use a new key for a new message.")
+
     public static let payloadTooLarge = APIError(status: 413, code: "payload_too_large", message: "Request body over 64 KiB.")
 
     public static func rateLimited(retryAfter: Int) -> APIError {

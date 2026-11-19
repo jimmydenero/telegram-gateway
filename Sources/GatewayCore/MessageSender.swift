@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import TDLibClient
 
@@ -21,6 +22,10 @@ public actor MessageSender {
     /// Sends per token per minute (docs/api.md "Rate limits").
     public static let sendsPerMinute = 20
     public static let defaultTimeout: Duration = .seconds(30)
+    /// How long a send's `idempotency_key` is remembered (docs/api.md "Sending messages").
+    public static let idempotencyWindow: TimeInterval = 24 * 3600
+    /// The most keys remembered at once; the oldest finished ones go first.
+    static let idempotencyCapacity = 10_000
 
     /// What Telegram said about one message being sent.
     enum Outcome: Sendable {
@@ -47,6 +52,17 @@ public actor MessageSender {
     /// Verdicts that arrived before `send` started waiting for them (the update stream and
     /// the request's response travel separately). Bounded; oldest first.
     private var early: [(key: Key, outcome: Outcome)] = []
+
+    /// A send made with an `idempotency_key`: what was asked, and the send itself, which a
+    /// retry with the same key joins or reads instead of sending again.
+    private struct KeyedSend {
+        let fingerprint: Data
+        let createdAt: Date
+        let task: Task<Message, any Error>
+    }
+
+    /// By principal, chat and key.
+    private var keyedSends: [String: KeyedSend] = [:]
 
     public init(
         grants: Grants, translator: Translator, telegram: any TelegramControl, rateLimiter: RateLimiter,
@@ -87,7 +103,68 @@ public actor MessageSender {
         return try await send(body, to: chatId, as: principal)
     }
 
+    /// Sends a message described by a request body (docs/api.md "Sending messages").
+    ///
+    /// With `idempotency_key`, a repeat of the same request (same principal, chat and body)
+    /// within `idempotencyWindow` sends nothing: it waits for the first one if that is still
+    /// in flight and answers with its message, or with its `504 send_timeout`, since that
+    /// message may still go out. A send that failed in any other way sent nothing, so the key
+    /// is forgotten and may be used again. The same key with a different body is
+    /// `409 idempotency_key_reused`.
     public func send(_ body: JSONObjectValue, to chatId: Int64, as principal: Principal) async throws -> Message {
+        guard let raw = body["idempotency_key"] else { return try await sendOnce(body, to: chatId, as: principal) }
+        guard let key = raw.stringValue, (1...128).contains(key.utf8.count) else {
+            throw APIError.invalidRequest("idempotency_key", "must be a string of 1 to 128 bytes")
+        }
+        var rest = body
+        rest["idempotency_key"] = nil
+        let fingerprint = Self.fingerprint(.object(rest))
+        let slot = "\(principal.rateLimitKey)\n\(chatId)\n\(key)"
+        forgetOldKeys()
+        if let existing = keyedSends[slot] {
+            guard existing.fingerprint == fingerprint else { throw APIError.idempotencyKeyReused }
+            return try await existing.task.value
+        }
+        let task = Task { try await self.sendOnce(rest, to: chatId, as: principal) }
+        keyedSends[slot] = KeyedSend(fingerprint: fingerprint, createdAt: clock.now, task: task)
+        do {
+            return try await task.value
+        } catch let error as APIError where error.code == "send_timeout" {
+            throw error
+        } catch {
+            // Nothing was sent: forget the key, unless it has since been taken by another send.
+            if keyedSends[slot]?.task == task { keyedSends[slot] = nil }
+            throw error
+        }
+    }
+
+    /// Keys remembered now (tests).
+    public var rememberedKeyCount: Int { keyedSends.count }
+
+    private func forgetOldKeys() {
+        let cutoff = clock.now.addingTimeInterval(-Self.idempotencyWindow)
+        keyedSends = keyedSends.filter { $0.value.createdAt > cutoff }
+        guard keyedSends.count >= Self.idempotencyCapacity else { return }
+        for (slot, _) in keyedSends.sorted(by: { $0.value.createdAt < $1.value.createdAt }).prefix(keyedSends.count - Self.idempotencyCapacity + 1) {
+            keyedSends[slot] = nil
+        }
+    }
+
+    /// SHA-256 of the body with every object's keys sorted, so that the same request
+    /// serialised in another key order is still the same request.
+    static func fingerprint(_ value: JSONValue) -> Data {
+        func canonical(_ value: JSONValue) -> JSONValue {
+            switch value {
+            case .array(let items): return .array(items.map(canonical))
+            case .object(let object):
+                return .object(JSONObjectValue(object.entries.sorted { $0.key < $1.key }.map { (key: $0.key, value: canonical($0.value)) }))
+            default: return value
+            }
+        }
+        return Data(SHA256.hash(data: canonical(value).serialized()))
+    }
+
+    private func sendOnce(_ body: JSONObjectValue, to chatId: Int64, as principal: Principal) async throws -> Message {
         try await checkAccess(.messagesSend, chats: [chatId], as: principal)
         let input = try SendInput(body)
         let replyTo = try ActionInput.optionalId(body, "reply_to", message: true)
