@@ -411,10 +411,12 @@ while developing or testing: tests use the fake TDLib and send nothing.
 Links to Volgenic ([link.md](link.md)): the gateway dials out to a Volgenic server and that
 Volgenic account drives it with the admin token, limited to the calls in
 [link.md](link.md#what-volgenic-calls), including sending messages as you. The base URL must
-be `https://`; `http://` works only for `127.0.0.1`, `localhost` or `::1`. Volgenic shows the `add` command, with its token, when you link a gateway.
+be `https://`; `http://` works only for `127.0.0.1`, `localhost` or `::1`. Volgenic shows the `add` command and the token when you link a gateway; `add` asks for the
+token without showing it, or reads it from a pipe (`pbpaste | tgw link add …`).
 
 ```
-$ tgw link add https://volgenic.com vgl_q3Jf…
+$ tgw link add https://volgenic.com
+Link token from Volgenic (vgl_…, not shown):
 added link to https://volgenic.com
 state     connected since 2026-10-26T14:03:07.412Z
 
@@ -435,12 +437,13 @@ each link's state (`connecting`, `connected`, `waiting`, `unauthorized`, `no_tok
 `unauthorized` until you run `add` again or reload. With the gateway stopped, `add` and
 `remove` only change the files, and the gateway applies them when it starts.
 
-The token is an argument, so it lands in your shell history; it is worthless once the link
-is revoked in Volgenic.
+The token is never an argument, so it stays out of shell history and `ps`. Given one the old
+way (`tgw link add <base_url> <token>`), `add` refuses and says to revoke that token in
+Volgenic, since it is now in your history.
 
 To try a link while developing, run a second gateway (`TGW_HOME=/tmp/tgw-dev TGW_PORT=41499`)
 and point it at Volgenic's development server with
-`tgw link add http://localhost:4100 vgl_…` in the same environment.
+`tgw link add http://localhost:4100` in the same environment.
 
 ### `tgw events`
 

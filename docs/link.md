@@ -33,14 +33,17 @@ gateway still never makes the account appear online, whoever asks.
 1. In Volgenic (Messages › Connections › Telegram) the person asks to link a gateway.
    Volgenic creates a **link token**: `vgl_` followed by 43 base64url characters (32 random
    bytes). It stores only the token's SHA-256 hash, shows the token once, and shows the
-   command to run on the Mac:
+   command to run on the Mac, which asks for the token:
 
    ```
-   tgw link add https://volgenic.com vgl_…
+   tgw link add https://volgenic.com
    ```
 
-2. `tgw link add <base_url> <token>` stores the link, the URL in `config.json` and the token
-   in the secret store, and tells the running gateway to reload, which connects the link
+2. `tgw link add <base_url>` reads the token from stdin: at a terminal it asks for it
+   without showing what is pasted; otherwise it reads the first line
+   (`pbpaste | tgw link add https://volgenic.com`). The token is never a command-line
+   argument, so it does not land in shell history or show in `ps`. It stores the link, the
+   URL in `config.json` and the token in the secret store, and tells the running gateway to reload, which connects the link
    at once. Adding a link for a base URL that already has one replaces its token.
    `tgw link list` shows the links and their state; `tgw link remove <base_url>` closes a
    link and deletes its token. There is at most one link per base URL; links to different
@@ -49,7 +52,8 @@ gateway still never makes the account appear online, whoever asks.
 3. Revoking the link in Volgenic deletes the hash and closes the socket with code `4401`.
 
 ```
-$ tgw link add https://volgenic.com vgl_q3Jf…
+$ tgw link add https://volgenic.com
+Link token from Volgenic (vgl_…, not shown):
 added link to https://volgenic.com
 state     connected since 2026-10-26T14:03:07.412Z
 

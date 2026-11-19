@@ -16,16 +16,28 @@ struct LinkCommand: AsyncParsableCommand {
     struct Add: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Add a link (or replace its token) and connect it now.",
-            discussion: "Paste the command Volgenic shows: tgw link add https://volgenic.com vgl_…"
+            discussion: """
+                Run the command Volgenic shows, tgw link add https://volgenic.com, and paste the token \
+                (vgl_…) when asked; it is not shown. Or pipe it in: pbpaste | tgw link add https://volgenic.com. \
+                The token is never a command-line argument, so it stays out of shell history and ps.
+                """
         )
 
         @Argument(help: "The Volgenic server, for example https://volgenic.com.")
         var baseURL: String
 
-        @Argument(help: "The link token Volgenic showed (vgl_…).")
-        var token: String
+        /// Only to refuse a token given the old way, with a pointer to the new one.
+        @Argument(help: .hidden)
+        var tokenArgument: String?
+
+        func validate() throws {
+            if tokenArgument != nil {
+                throw ValidationError("the token is read from stdin, not the command line, so it stays out of shell history and ps: run tgw link add \(baseURL) and paste it when asked. The one you typed is now in your shell history; revoke it in Volgenic and link again.")
+            }
+        }
 
         func run() async throws {
+            let token = try LinkCommand.readToken()
             let paths = Paths.resolve()
             let config = try Config.load(paths: paths)
             let secrets = Secrets.resolve(config: config, paths: paths)
@@ -73,7 +85,7 @@ struct LinkCommand: AsyncParsableCommand {
                 return
             }
             guard !config.links.isEmpty else {
-                print("no links. Add one with the command Volgenic shows: tgw link add <base_url> <token>")
+                print("no links. Add one with the command Volgenic shows: tgw link add <base_url>, then paste the token")
                 return
             }
             var rows: [[String]] = []
@@ -109,6 +121,18 @@ struct LinkCommand: AsyncParsableCommand {
             print("removed link to \(try LinkSettings.normalize(baseURL))")
             _ = await LinkCommand.reload()
         }
+    }
+
+    /// The link token from stdin: asked for without echo at a terminal, else the first line.
+    static func readToken() throws -> String {
+        let token: String
+        if isatty(STDIN_FILENO) != 0 {
+            token = try Prompt.secret("Link token from Volgenic (vgl_…, not shown): ")
+        } else {
+            guard let line = readLine() else { throw CLIError("no link token on stdin: pipe it in, or run this at a terminal to paste it") }
+            token = line
+        }
+        return token.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Asks the running gateway to reload; nil (with a note) when it is not running.

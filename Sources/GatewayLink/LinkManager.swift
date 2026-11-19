@@ -79,7 +79,7 @@ public actor LinkManager: LinkReloading {
                 }
                 broken[url] = LinkStatus(
                     baseURL: url, state: .noToken, since: broken[url]?.since ?? clock.now,
-                    lastError: "no link token for \(url) in \(secrets.description); run tgw link add \(url) <token>", lastErrorAt: clock.now
+                    lastError: "no link token for \(url) in \(secrets.description); run tgw link add \(url) and paste the token", lastErrorAt: clock.now
                 )
                 continue
             }

@@ -67,7 +67,8 @@ the API complete and makes the gateway usable on a machine with no app installed
 
 **Volgenic** is a web application whose Messages tab works on top of a gateway. Volgenic runs
 on the internet and the gateway listens only on `127.0.0.1`, so Volgenic cannot connect in.
-Instead the user runs `tgw link add <base_url> <token>` with the command Volgenic shows, and
+Instead the user runs `tgw link add <base_url>` with the command Volgenic shows, pastes the
+token Volgenic shows when asked, and
 the gateway dials out: it opens one WebSocket to `<base_url>/messages/telegram/link` and
 keeps it open, reconnecting after every drop. Over it Volgenic sends HTTP requests in
 frames, which the gateway runs through its own router in the same process with the admin
