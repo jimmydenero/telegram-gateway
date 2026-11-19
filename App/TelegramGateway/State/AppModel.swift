@@ -907,14 +907,16 @@ final class AppModel {
         selectedApp = requests.first.map { .request($0.requestId) } ?? grants.first.map { .grant($0.id) }
     }
 
-    /// Opens the approval screen with the request's chats and permissions pre-ticked.
+    /// Opens the approval screen with the request's chats and reading permissions pre-ticked.
+    /// The permissions that act as the user (`Permission.actions`: sending, marking read,
+    /// managing chats) start unticked even when asked for: the owner opts in to each.
     func beginApproval(_ request: AccessRequest) {
         let requested = request.requestedChats.chatIds
         let monitoredIds = chats.filter(\.isMonitored).map(\.id)
         approval = ApprovalDraft(
             request: request,
             chatIds: Set(requested.isEmpty ? monitoredIds : requested),
-            scopes: Set(request.scopes))
+            scopes: Set(request.scopes.filter { !Permission.actions.contains($0) }))
         accessError = nil
     }
 

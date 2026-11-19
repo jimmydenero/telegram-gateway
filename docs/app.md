@@ -210,8 +210,11 @@ where you decide exactly what it gets:
 - **Can read.** One checkbox per permission it asked for. You can remove permissions; you
   cannot add ones it did not ask for.
 - **Can act as you.** Only when the app asked to act on your account: a checkbox for each
-  of "Send and react", "Mark as read" and "Manage chats" it asked for. Untick one to let the app do the rest
-  without it. (This section is written but has not yet been built or run.)
+  of "Send and react", "Mark as read" and "Manage chats" it asked for. These start
+  **unticked**, unlike the reading permissions: tick each one you want the app to have.
+  Approving with them unticked gives the app everything else it asked for, without them.
+  (This section is written but has not yet been built or run in the app; its logic is
+  covered by the app's unit tests.)
 
 The bar at the bottom summarises the decision ("3 chats · 3 permissions"). **Approve** gives
 the app its access; **Cancel** leaves the request pending.

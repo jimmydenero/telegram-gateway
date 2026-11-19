@@ -194,18 +194,20 @@ Can read
   [x] Chat names and details   Titles, usernames and member counts
 
 Can act as you
-  [x] Send and react           Sends messages and files as you, forwards, edits and
+  [ ] Send and react           Sends messages and files as you, forwards, edits and
                                deletes what you sent, reacts and votes; people see it as you
-  [x] Mark as read             Mark messages read as you: senders see read receipts
+  [ ] Mark as read             Mark messages read as you: senders see read receipts
 
-2 chats · 4 permissions                          [ Cancel ]   [ Approve ]
+2 chats · 3 permissions                          [ Cancel ]   [ Approve ]
 ```
 
 **Can act as you** appears only when the app asked for `messages:send`, `messages:mark_read`
-or `chats:manage` ("Manage chats: pins, archives and mutes these chats"). Each is ticked like the other permissions the app asked for, and kept apart from
-them so that it is never mistaken for one more kind of reading. Unticking one gives the app
-everything else it asked for, without it. This wording is in the menu bar app's source but
-the app has not been built or run with it.
+or `chats:manage` ("Manage chats: pins, archives and mutes these chats"). Each starts
+**unticked**, even though the app asked for it, and is kept apart from the reading
+permissions so that it is never mistaken for one more kind of reading: the user opts in to
+each by ticking it. Approving with them unticked gives the app everything else it asked
+for, without them. This is in the menu bar app's source and its unit tests, but the app has
+not been built or run with it.
 
 The user can untick scopes, untick chats, add other monitored chats, or switch the grant to a
 folder. Scopes can only be removed, never added beyond what the app asked for. What the user

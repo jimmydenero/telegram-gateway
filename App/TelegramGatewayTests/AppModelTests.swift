@@ -579,8 +579,37 @@ struct AppModelTests {
         #expect(draft.chatIds.count == 3)
         #expect(model.approvalChatIds(draft).count == 3)
         #expect(model.otherMonitoredCount(draft) == 0)
-        // Sending is pre-ticked like every permission asked for; the owner can untick it.
-        #expect(draft.scopes == ["messages:read", "messages:send"])
+        // Sending starts unticked even though it was asked for; the owner opts in.
+        #expect(draft.scopes == ["messages:read"])
+    }
+
+    @Test("Permissions that act as you start unticked; reading ones start ticked")
+    func actionScopesStartUnticked() async throws {
+        let model = AppModel.preview(.loggedInQuiet)
+        await model.refresh()
+        await model.loadChats()
+        let request = AccessRequest(
+            requestId: "req_act", status: .pending, name: "Inbox", description: "d",
+            scopes: ["messages:read", "chats:read", "messages:send", "messages:mark_read", "chats:manage"],
+            requestedChats: .any, requestedChatsStatus: nil, webhookUrl: nil, createdAt: Date(), expiresAt: Date().addingTimeInterval(900))
+        model.beginApproval(request)
+        var draft = try #require(model.approval)
+        #expect(draft.scopes == ["messages:read", "chats:read"])
+        // Ticking one is the owner's choice, and approving then grants it.
+        draft.scopes.insert("messages:send")
+        model.approval = draft
+        #expect(model.approval?.scopes.contains("messages:send") == true)
+        #expect(model.approval?.scopes.contains("messages:mark_read") == false)
+        #expect(model.approval?.scopes.contains("chats:manage") == false)
+
+        // A request for nothing but an action has nothing ticked, so it cannot be approved as is.
+        let onlySend = AccessRequest(
+            requestId: "req_send", status: .pending, name: "Sender", description: "d", scopes: ["messages:send"],
+            requestedChats: .any, requestedChatsStatus: nil, webhookUrl: nil, createdAt: Date(), expiresAt: Date().addingTimeInterval(900))
+        model.beginApproval(onlySend)
+        let empty = try #require(model.approval)
+        #expect(empty.scopes.isEmpty)
+        #expect(!model.canApprove(empty))
     }
 
     @Test("Deny, resume delivery, revoke")
