@@ -25,16 +25,17 @@ public actor MessageReader {
         self.rateLimiter = rateLimiter
     }
 
-    /// Marks the chat read up to the message with public id `upTo`, or up to its newest
-    /// message, and with `mentions` also clears its unread mentions. Returns the chat with its
-    /// new unread state.
+    /// Marks the chat read up to the message with public id `upTo`, the newest message the
+    /// person saw, and with `mentions` also clears its unread mentions. Returns the chat with
+    /// its new unread state. There is no "up to the newest": a message that arrived after the
+    /// person looked must not get a read receipt.
     ///
     /// Checks, in order: the `messages:mark_read` scope (`403 insufficient_scope`), that the
     /// grant is still in force (`401 token_revoked`), that the chat is granted and monitored
     /// (`403 chat_not_granted`; for the admin token, monitored), the rate limit (`429`), and a
     /// live Telegram session (`503`). Telegram's refusal is `502 send_failed`, as for the
     /// other actions; a flood wait is `429`.
-    public func markRead(chat chatId: Int64, upTo: Int64? = nil, mentions: Bool = false, as principal: Principal) async throws -> ChatInfo {
+    public func markRead(chat chatId: Int64, upTo: Int64, mentions: Bool = false, as principal: Principal) async throws -> ChatInfo {
         try await grants.require(.messagesMarkRead, principal)
         if let grant = principal.grant {
             guard let fresh = try await grants.grant(grant.id) else { throw APIError.invalidToken }
@@ -42,24 +43,16 @@ public actor MessageReader {
             try await grants.require(.messagesMarkRead, .app(fresh))
         }
         try await grants.requireChat(chatId, principal)
-        if let upTo, upTo <= 0 || upTo > Int64.max >> 20 { throw APIError.invalidRequest("up_to_message_id", "must be a message id") }
+        if upTo <= 0 || upTo > Int64.max >> 20 { throw APIError.invalidRequest("up_to_message_id", "must be a message id") }
         let decision = await rateLimiter.hit("read:\(principal.rateLimitKey)", limit: Self.readsPerMinute)
         guard decision.allowed else { throw APIError.rateLimited(retryAfter: decision.retryAfter) }
         let tdlib = try await telegram.requireLive()
 
         do {
-            let messageId: Int64?
-            if let upTo {
-                messageId = MessageId.toInternal(upTo)
-            } else {
-                messageId = try await tdlib.request("getChat", ["chat_id": chatId]).object.object("last_message")?.int64("id")
-            }
-            if let messageId {
-                _ = try await tdlib.request("viewMessages", [
-                    "chat_id": chatId, "message_ids": [messageId],
-                    "source": ["@type": "messageSourceChatHistory"] as JSONObject, "force_read": true,
-                ])
-            }
+            _ = try await tdlib.request("viewMessages", [
+                "chat_id": chatId, "message_ids": [MessageId.toInternal(upTo)],
+                "source": ["@type": "messageSourceChatHistory"] as JSONObject, "force_read": true,
+            ])
             if mentions { _ = try await tdlib.request("readAllChatMentions", ["chat_id": chatId]) }
         } catch let error as TDLibError {
             throw MessageSender.apiError(code: error.code, message: error.message)

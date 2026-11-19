@@ -341,8 +341,10 @@ None of this has been run against a real Volgenic server or a live account.
 ## Marking read over the link
 
 When the person opens a chat in Volgenic, Volgenic sends a `request` frame for
-`POST /v1/chats/{chat_id}/read` ([api.md](api.md#marking-as-read)), with an empty body or
-`{"up_to_message_id": "…", "mentions": true}`. The answer is the chat with its new unread
+`POST /v1/chats/{chat_id}/read` ([api.md](api.md#marking-as-read)) with
+`{"up_to_message_id": "…"}`, the newest message the person saw there, and `"mentions": true`
+to clear mentions too. `up_to_message_id` is required, so a message that reached Volgenic after
+the person looked stays unread. The answer is the chat with its new unread
 counts, and the change also arrives in the `subscribe` stream as `chat.read`. Over the link
 this runs with the admin token's authority, so it works in any monitored chat, within the
 limit of 60 reads per minute. Not yet run against a real Volgenic server.

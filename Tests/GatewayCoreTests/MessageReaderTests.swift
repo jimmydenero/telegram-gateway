@@ -29,9 +29,9 @@ import Testing
         }
     }
 
-    @Test func readSendsForceReadForTheNewestMessageWithoutOpeningTheChat() async throws {
+    @Test func readSendsForceReadForTheGivenMessageWithoutOpeningTheChat() async throws {
         let s = try await Setup()
-        let chat = try await s.reader.markRead(chat: Fixtures.channelId, as: .admin)
+        let chat = try await s.reader.markRead(chat: Fixtures.channelId, upTo: ReadFixtures.newestMessageId, as: .admin)
         let view = try #require(await s.core.tdlib.requests(ofType: "viewMessages").last?.object)
         #expect(view.int64("chat_id") == Fixtures.channelId)
         #expect(view.array("message_ids")?.compactMap(Translator.int64) == [MessageId.toInternal(ReadFixtures.newestMessageId)])
@@ -57,13 +57,13 @@ import Testing
     @Test func withoutTheScopeNothingIsSent() async throws {
         let s = try await Setup()
         let (sender, _) = try await s.core.makeGrant(scopes: [.messagesRead, .chatsRead, .messagesSend, .chatsManage])
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .app(sender)) }?.code == "insufficient_scope")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(sender)) }?.code == "insufficient_scope")
         let (revoked, _) = try await s.core.makeGrant(scopes: [.messagesMarkRead])
         try await s.core.grants.revoke(revoked.id)
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .app(revoked)) }?.code == "token_revoked")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(revoked)) }?.code == "token_revoked")
         let (elsewhere, _) = try await s.core.makeGrant(scopes: [.messagesMarkRead], chats: .list([Fixtures.groupId]))
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .app(elsewhere)) }?.code == "chat_not_granted")
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.privateChatId, as: .admin) }?.code == "chat_not_granted")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(elsewhere)) }?.code == "chat_not_granted")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.privateChatId, upTo: 1529, as: .admin) }?.code == "chat_not_granted")
         #expect(await s.core.tdlib.requests(ofType: "viewMessages").isEmpty)
         #expect(await s.core.tdlib.requests(ofType: "readAllChatMentions").isEmpty)
     }
@@ -71,7 +71,7 @@ import Testing
     @Test func grantedAppCanRead() async throws {
         let s = try await Setup()
         let (grant, _) = try await s.core.makeGrant(scopes: [.messagesMarkRead])
-        _ = try await s.reader.markRead(chat: Fixtures.channelId, mentions: true, as: .app(grant))
+        _ = try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, mentions: true, as: .app(grant))
         #expect(await s.core.tdlib.requests(ofType: "viewMessages").count == 1)
         #expect(await s.core.tdlib.requests(ofType: "readAllChatMentions").count == 1)
     }
@@ -79,25 +79,25 @@ import Testing
     @Test func rateLimitHoldsAtSixtyAMinutePerToken() async throws {
         let s = try await Setup()
         let (grant, _) = try await s.core.makeGrant(scopes: [.messagesMarkRead])
-        for _ in 0..<MessageReader.readsPerMinute { _ = try await s.reader.markRead(chat: Fixtures.channelId, as: .app(grant)) }
-        let limited = await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .app(grant)) }
+        for _ in 0..<MessageReader.readsPerMinute { _ = try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(grant)) }
+        let limited = await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(grant)) }
         #expect(limited?.code == "rate_limited")
         #expect(await s.core.tdlib.requests(ofType: "viewMessages").count == MessageReader.readsPerMinute)
         // The budget is per token: the admin is not held up by the app.
-        _ = try await s.reader.markRead(chat: Fixtures.channelId, as: .admin)
+        _ = try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .admin)
         s.core.clock.advance(by: .seconds(61))
-        _ = try await s.reader.markRead(chat: Fixtures.channelId, as: .app(grant))
+        _ = try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .app(grant))
     }
 
     @Test func needsALiveSessionAndMapsTelegramErrors() async throws {
         let s = try await Setup()
         await s.telegram.set(state: .waitPhoneNumber)
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .admin) }?.code == "not_logged_in")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .admin) }?.code == "not_logged_in")
         await s.telegram.set(state: .ready)
         await s.core.tdlib.on("viewMessages") { _ in throw TDLibError(code: 429, message: "Too Many Requests: retry after 5") }
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .admin) }?.code == "rate_limited")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .admin) }?.code == "rate_limited")
         await s.core.tdlib.on("viewMessages") { _ in throw TDLibError(code: 400, message: "MESSAGE_ID_INVALID") }
-        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, as: .admin) }?.code == "send_failed")
+        #expect(await apiError { try await s.reader.markRead(chat: Fixtures.channelId, upTo: 1529, as: .admin) }?.code == "send_failed")
         #expect(await s.forbiddenRequests().isEmpty)
     }
 
@@ -106,7 +106,7 @@ import Testing
         // TDLib announced the chat with 3 unread before the read.
         _ = try await s.core.translator.chatInfo(Fixtures.channelId, refresh: true)
         let before = try await s.core.eventLog.headSeq()
-        let chat = try await s.reader.markRead(chat: Fixtures.channelId, as: .admin)
+        let chat = try await s.reader.markRead(chat: Fixtures.channelId, upTo: ReadFixtures.newestMessageId, as: .admin)
         #expect(chat.state?.unreadCount == 0)
         #expect(try await s.core.eventLog.headSeq() == before)
         let update = Fixtures.updateChatReadInbox(chatId: Fixtures.channelId, lastRead: ReadFixtures.newestMessageId, unread: 0)

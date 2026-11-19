@@ -37,11 +37,11 @@ extension AppRoutes {
         let principal = try context.requirePrincipal()
         try await deps.grants.require(.messagesMarkRead, principal)
         let body = try await jsonBody(request, context)
-        var upTo: Int64?
-        if let raw = try body.optionalString("up_to_message_id") {
-            guard let id = Int64(raw), id > 0 else { throw APIError.invalidRequest("up_to_message_id", "must be a message id string") }
-            upTo = id
+        // Required: the newest message the person saw, so nothing that arrived later is read.
+        guard let raw = try body.optionalString("up_to_message_id") else {
+            throw APIError.invalidRequest("up_to_message_id", "required: the newest message the person saw")
         }
+        guard let upTo = Int64(raw), upTo > 0 else { throw APIError.invalidRequest("up_to_message_id", "must be a message id string") }
         let mentions = try ActionInput.bool(body, "mentions")
         let chat = try await deps.reader.markRead(chat: actionChat(context), upTo: upTo, mentions: mentions, as: principal)
         return json(["chat": chat.json(isMonitored: true)])

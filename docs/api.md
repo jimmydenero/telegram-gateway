@@ -1137,10 +1137,10 @@ Content-Type: application/json
 
 | Field | Required | Rules |
 |---|---|---|
-| `up_to_message_id` | no | Marks the chat read up to and including this message, as a string. Without it, up to the newest message. |
+| `up_to_message_id` | yes | The newest message the person saw, as a string. The chat is marked read up to and including it; anything newer stays unread, so a message that arrived after the person looked gets no read receipt. There is no "up to the newest". |
 | `mentions` | no | `true` also clears the chat's unread mentions and replies to the user (`unread_mention_count`). Default `false`. |
 
-An empty body is allowed. Response `200` with the chat, in the format of
+Response `200` with the chat, in the format of
 [the chat object](#the-chat-object), with its new `unread_count`, `unread_mention_count` and
 `last_read_inbox_message_id`:
 
@@ -1156,7 +1156,7 @@ the user's phone ([events.md](events.md#chatread-and-chatposition)).
 | The grant lacks `messages:mark_read` | `403 insufficient_scope` |
 | The grant was revoked | `401 token_revoked` |
 | The chat is outside the grant, not monitored, or does not exist | `403 chat_not_granted` |
-| `up_to_message_id` not a message id string, `mentions` not a boolean | `400 invalid_request` with `details.field` |
+| `up_to_message_id` missing or not a message id string, `mentions` not a boolean | `400 invalid_request` with `details.field` |
 | More than 60 reads in a minute from this token | `429 rate_limited` |
 | Telegram asks the account to slow down (a flood wait) | `429 rate_limited`, with Telegram's wait in `retry_after` |
 | The gateway is not signed in, or the connection to Telegram is down | `503 not_logged_in`, `503 telegram_unavailable` |

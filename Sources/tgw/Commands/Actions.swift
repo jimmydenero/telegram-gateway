@@ -64,20 +64,19 @@ struct Vote: AsyncParsableCommand {
 struct ReadCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "read",
-        abstract: "Mark a chat read as you: <chat>. The senders see read receipts.",
-        discussion: "Marks the chat read up to its newest message, or up to --up-to. Asks first unless --yes."
+        abstract: "Mark a chat read as you: <chat> --up-to <message>. The senders see read receipts.",
+        discussion: "Marks the chat read up to and including the message given with --up-to, the newest one you read; later messages stay unread. Asks first unless --yes."
     )
     @Argument(parsing: .allUnrecognized) var chats: [String] = []
-    @Option(name: .customLong("up-to"), help: "Mark read only up to this message id.") var upTo: String?
+    @Option(name: .customLong("up-to"), help: "The newest message you read, by id (required).") var upTo: String
     @Flag(help: "Also clear the chat's unread mentions.") var mentions = false
     @Flag(name: .shortAndLong) var yes = false
     func validate() throws {
         guard chats.count == 1, Int64(chats[0]) != nil else { throw ValidationError("give one chat id") }
-        if let upTo { try validateMessageId(upTo) }
+        try validateMessageId(upTo)
     }
     func run() async throws {
-        var body: JSONObjectValue = ["mentions": .bool(mentions)]
-        if let upTo { body["up_to_message_id"] = .string(upTo) }
+        let body: JSONObjectValue = ["mentions": .bool(mentions), "up_to_message_id": .string(upTo)]
         try await action("POST", "/v1/chats/\(chats[0])/read", body, yes: yes)
     }
 }

@@ -20,7 +20,7 @@ import Testing
             #expect(partial.status == 200)
             #expect(partial.json["chat"]?["unread_count"] == 1)
             #expect(partial.json["chat"]?["unread_mention_count"] == 2)
-            let all = try await client.call(.post, path, token: token, body: ["mentions": true])
+            let all = try await client.call(.post, path, token: token, body: ["up_to_message_id": "1530", "mentions": true])
             #expect(all.status == 200)
             #expect(all.json["chat"]?["id"] == .id(Fixtures.channelId))
             #expect(all.json["chat"]?["unread_count"] == 0)
@@ -43,9 +43,15 @@ import Testing
             #expect(missing.status == 403 && missing.json["error"]?["code"] == "insufficient_scope")
             let badId = try await client.call(.post, path, token: App.adminToken, body: ["up_to_message_id": "x"])
             #expect(badId.status == 400)
-            let badFlag = try await client.call(.post, path, token: App.adminToken, body: ["mentions": "yes"])
+            let badFlag = try await client.call(.post, path, token: App.adminToken, body: ["up_to_message_id": "1530", "mentions": "yes"])
             #expect(badFlag.status == 400)
-            let unmonitored = try await client.call(.post, "/v1/chats/\(Fixtures.privateChatId)/read", token: App.adminToken)
+            // Without up_to_message_id nothing is read: a message that arrived after the person
+            // looked would otherwise get a read receipt.
+            for body: JSONValue in [[:], ["mentions": true], ["up_to_message_id": .null]] {
+                let missingId = try await client.call(.post, path, token: App.adminToken, body: body)
+                #expect(missingId.status == 400 && missingId.json["error"]?["details"]?["field"] == "up_to_message_id")
+            }
+            let unmonitored = try await client.call(.post, "/v1/chats/\(Fixtures.privateChatId)/read", token: App.adminToken, body: ["up_to_message_id": "1530"])
             #expect(unmonitored.status == 403)
         }
         #expect(await app.tdlib.requests(ofType: "viewMessages").isEmpty)
@@ -66,7 +72,7 @@ import Testing
         try await app.monitorDefaults()
         await ReadFixtures.install(app.tdlib)
         let api = InProcessAPI(deps: app.deps, adminToken: App.adminToken)
-        let response = await api.perform(LinkHTTPRequest(method: "POST", path: "/v1/chats/\(Fixtures.channelId)/read", body: JSONValue.object([:]).serialized()), maxBodyBytes: LinkPolicy.maxBodyBytes)
+        let response = await api.perform(LinkHTTPRequest(method: "POST", path: "/v1/chats/\(Fixtures.channelId)/read", body: JSONValue.object(["up_to_message_id": "1530"]).serialized()), maxBodyBytes: LinkPolicy.maxBodyBytes)
         #expect(response.status == 200)
         #expect(await app.tdlib.requests(ofType: "viewMessages").count == 1)
     }
