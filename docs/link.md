@@ -106,7 +106,7 @@ The first frame on every connection:
 
 ```json
 {"type": "hello", "protocol": 1, "gateway_version": "0.1.0", "auth_state": "ready",
- "account": {"id": "123456789", "name": "Ada Lovelace", "username": "ada", "phone": "+15551234567"},
+ "account": {"id": "123456789", "name": "Ada Lovelace", "username": "ada", "phone_last4": "4567"},
  "head_seq": 4812}
 ```
 
@@ -115,7 +115,7 @@ The first frame on every connection:
 | `protocol` | `1`, this document. |
 | `gateway_version` | The gateway's version. |
 | `auth_state` | The Telegram sign-in state, as `GET /v1/admin/auth` reports it ([api.md](api.md#health) lists the values). `unknown` when the gateway has no `api_id` / `api_hash`. |
-| `account` | `null` unless `auth_state` is `ready`. `id` is the Telegram user id as a string, `name` the first and last name, `username` without `@` (or `null`), `phone` in international form with `+`. |
+| `account` | `null` unless `auth_state` is `ready`. `id` is the Telegram user id as a string, `name` the first and last name, `username` without `@` (or `null`), `phone_last4` the last four digits of the account's phone number, as the local API shows it (`GET /v1/admin/status`); the whole number is never sent. |
 | `head_seq` | The newest `seq` in the event log, `0` when it is empty. |
 
 ### `request` (Volgenic → gateway) and `response`

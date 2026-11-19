@@ -151,7 +151,7 @@ enum LinkFrames {
         guard let info else { return .null }
         return [
             "id": .id(info.userId), "name": .string(info.displayName),
-            "username": .optional(info.username), "phone": .optional(info.phoneNumber),
+            "username": .optional(info.username), "phone_last4": .optional(info.phoneLast4),
         ]
     }
 

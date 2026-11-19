@@ -33,7 +33,7 @@ struct Gateway {
         let tdlib = FakeTDLib()
         await Fixtures.populate(tdlib)
         telegram = FakeTelegram(state: state, tdlib: tdlib)
-        await telegram.set(account: AccountInfo(userId: 987_654_321, displayName: "Ada Lovelace", username: "ada", phoneLast4: "4567", phoneNumber: "+15551234567"))
+        await telegram.set(account: AccountInfo(userId: 987_654_321, displayName: "Ada Lovelace", username: "ada", phoneLast4: "4567"))
         let translator = Translator(tdlib: tdlib)
         let eventLog = EventLog(store: store, clock: clock)
         let grants = Grants(store: store, adminToken: Gateway.adminToken, clock: clock)
@@ -116,7 +116,9 @@ struct LinkTests {
             #expect(hello["gateway_version"] == "0.1.0")
             #expect(hello["auth_state"] == "ready")
             #expect(hello["head_seq"] == 1)
-            #expect(hello["account"] == ["id": "987654321", "name": "Ada Lovelace", "username": "ada", "phone": "+15551234567"])
+            // Only the last four digits of the account's number, as on the local API.
+            #expect(hello["account"] == ["id": "987654321", "name": "Ada Lovelace", "username": "ada", "phone_last4": "4567"])
+            #expect(!hello.serializedString().contains("5551234"))
             try await eventually("connected") { await client.currentStatus().state == .connected }
         }
     }
