@@ -40,7 +40,7 @@ enum Permission {
         case "media:read": "Download what is attached to those messages"
         case "chats:read": "Titles, usernames and member counts"
         case "messages:send": "Sends messages and files as you, forwards, edits and deletes what you sent, reacts and votes; people see it as you"
-        case "messages:mark_read": "Mark messages read as you: senders see read receipts"
+        case "messages:mark_read": "Marks messages read as you; the senders see read receipts"
         case "chats:manage": "Pins, archives and mutes these chats"
         default: "Not known to this version of the app"
         }

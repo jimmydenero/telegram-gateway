@@ -196,7 +196,7 @@ Can read
 Can act as you
   [ ] Send and react           Sends messages and files as you, forwards, edits and
                                deletes what you sent, reacts and votes; people see it as you
-  [ ] Mark as read             Mark messages read as you: senders see read receipts
+  [ ] Mark as read             Marks messages read as you; the senders see read receipts
 
 2 chats · 3 permissions                          [ Cancel ]   [ Approve ]
 ```

@@ -563,7 +563,7 @@ enum Scope {
         case "media:read": "Download photos, videos and files"
         case "chats:read": "List the granted chats and learn when coverage changes"
         case "messages:send": "Send messages and files, forward, edit and delete what you sent, react and vote as you"
-        case "messages:mark_read": "Mark messages read as you: senders see read receipts"
+        case "messages:mark_read": "Marks messages read as you; the senders see read receipts"
         case "chats:manage": "Pin, archive and mute the granted chats"
         default: "Unknown scope"
         }
