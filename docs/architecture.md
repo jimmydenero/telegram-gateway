@@ -291,8 +291,9 @@ reveals that such a chat exists.
 
 `MessageSender` is the one actor that acts on the account. Every action, whether from an app,
 `tgw` or the link, passes the same checks there: the scope (`messages:send`, or
-`chats:manage` for chat settings and starting chats), that the grant is still in force, that
+`chats:manage` for chat settings), that the grant is still in force, that
 each chat is granted and monitored, the shared rate limit, and a live session. A file to send
 is written to `uploads/` in the data directory for TDLib to read, and removed once Telegram
-answers. Only the admin token's `POST /v1/chats` changes the monitored set; an app's lookup
-never widens its grant.
+answers. Starting a chat by username or phone number (`POST /v1/chats`) is for the admin
+token only, because the lookup happens before any grant could be checked; it adds the chat to
+the monitored set.

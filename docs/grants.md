@@ -66,7 +66,7 @@ event log or delivered.](images/grants.png)
 | Learn the titles, usernames and member counts of its granted chats, if it holds `chats:read`. | List the user's chats, or find out whether a chat it was not granted exists. |
 | Ask for access again, or for more. | Approve itself, widen its own grant, or see other apps' grants. |
 | Send messages and files as the user, forward messages, edit and delete the user's own messages, react and vote in polls, in chats that are both granted to it and monitored, if it holds `messages:send`. | Do any of that in another chat, or edit or delete someone else's message. |
-| Pin, archive and mute its granted chats, and look up a chat by username or phone number, if it holds `chats:manage`. | Add a chat to its grant by looking it up: a chat found that way must already be granted. |
+| Pin, archive and mute its granted chats, if it holds `chats:manage`. | Look up a chat by username or phone number (`POST /v1/chats` is for the admin token only), or add a chat to its grant. |
 | Mark its granted chats read as the user when a person using it read them, if it holds `messages:mark_read`. The senders then see read receipts. | Mark any other chat read. |
 | | Make the account appear online, show "typing…", join or leave groups and channels, or act on the account in any other way. |
 
@@ -96,7 +96,7 @@ data; the chat set determines from which chats. Both apply to every request.
 | `chats:read` | Chat names and details | Listing granted chats with title, username, member count, read state, position and mute state, and learning when coverage changes. | `GET /v1/chats`, and the `chat.updated`, `chat.read`, `chat.position`, `monitoring.started` and `monitoring.stopped` events. |
 | `messages:send` | Send and react | Acting on messages **as the user** in the granted chats: sending text and files, optionally formatted or as a reply; forwarding (both chats must be granted); editing and deleting the user's own messages; reacting; voting in polls. Everyone in the chat sees these as the user's. | `POST /v1/chats/{chat_id}/messages` and the [message actions](api.md#message-and-chat-actions) |
 | `messages:mark_read` | Mark as read | Marking the granted chats read **as the user**, up to a message or the newest, and optionally clearing unread mentions. The people who wrote the messages see read receipts, and the unread badges clear on the user's other devices. Granted only if the app asked for it. | `POST /v1/chats/{chat_id}/read` |
-| `chats:manage` | Manage chats | Pinning, archiving and muting the granted chats, which changes how they appear in the user's own Telegram apps, and looking up a chat by username or phone number. | `PATCH /v1/chats/{chat_id}`, `POST /v1/chats` |
+| `chats:manage` | Manage chats | Pinning, archiving and muting the granted chats, which changes how they appear in the user's own Telegram apps. | `PATCH /v1/chats/{chat_id}` |
 
 Until this version `messages:send` allowed sending plain text only. A grant approved then
 keeps the scope and so can now also forward, edit, delete, react and vote; the user who does
@@ -202,8 +202,7 @@ Can act as you
 ```
 
 **Can act as you** appears only when the app asked for `messages:send`, `messages:mark_read`
-or `chats:manage` ("Manage chats: pins, archives and mutes these chats, and finds chats by
-username or phone number"). Each is ticked like the other permissions the app asked for, and kept apart from
+or `chats:manage` ("Manage chats: pins, archives and mutes these chats"). Each is ticked like the other permissions the app asked for, and kept apart from
 them so that it is never mistaken for one more kind of reading. Unticking one gives the app
 everything else it asked for, without it. This wording is in the menu bar app's source but
 the app has not been built or run with it.

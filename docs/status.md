@@ -11,7 +11,7 @@ limitations below should inform deployment decisions.
 - **Actions**, new: sending formatted text and files (photos, videos, documents, voice
   notes, audio, animations, stickers), forwarding, editing and deleting the account's own
   messages, reactions, poll votes, pinning, archiving and muting chats, and starting a chat
-  by username or phone number ([api.md](api.md#message-and-chat-actions)). Each works from
+  by username or phone number (admin token only) ([api.md](api.md#message-and-chat-actions)). Each works from
   the library, `tgw`, the HTTP API and the link to Volgenic, and all go through
   `MessageSender`'s checks. Tested with the scripted stand-in for TDLib only; see below.
 

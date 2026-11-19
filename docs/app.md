@@ -227,7 +227,7 @@ the app its access; **Cancel** leaves the request pending.
 | Chat names and details | `chats:read` | See the titles, usernames and member counts of its chats. |
 | Send and react | `messages:send` | Act on messages **as you** in its chats: send messages and files, forward, edit and delete what you sent, react, and vote in polls. People in those chats see it as you. Shown under its own heading, **Can act as you**, when approving and in the app's detail. |
 | Mark as read | `messages:mark_read` | Mark messages read **as you** in its chats when you read them there. The people who wrote them see read receipts. Under **Can act as you**. |
-| Manage chats | `chats:manage` | Pin, archive and mute its chats, which changes how they appear in your own Telegram apps, and look up a chat by username or phone number. Also under **Can act as you**. |
+| Manage chats | `chats:manage` | Pin, archive and mute its chats, which changes how they appear in your own Telegram apps. Also under **Can act as you**. |
 
 An app only ever sees chats that are both granted to it and currently monitored.
 

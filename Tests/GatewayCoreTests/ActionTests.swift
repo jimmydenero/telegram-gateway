@@ -54,7 +54,7 @@ import Testing
         #expect(await s.core.tdlib.requests.allSatisfy { !forbidden.contains($0.object.type ?? "") })
     }
 
-    @Test(arguments: ["forward", "edit", "delete", "react", "unreact", "vote", "pin", "archive", "mute", "start"])
+    @Test(arguments: ["forward", "edit", "delete", "react", "unreact", "vote", "pin", "archive", "mute"])
     func requiresScopeAndFreshGrant(_ name: String) async throws {
         let s = try await Setup()
         let (reader, _) = try await s.core.makeGrant()
@@ -62,6 +62,23 @@ import Testing
         let (writer, _) = try await s.core.makeGrant(scopes: [.messagesSend, .chatsManage])
         try await s.core.grants.revoke(writer.id)
         #expect(await apiError { try await s.run(name, as: .app(writer)) }?.code == "token_revoked")
+    }
+
+    /// Looking a phone number or username up tells whoever asked whether it is on Telegram,
+    /// before any grant can be checked, so only the admin may start a chat. An app is refused
+    /// with nothing sent to Telegram, whatever its scopes.
+    @Test(arguments: [["phone": "+15551234567"], ["username": "acmeupdates"]] as [JSONObjectValue])
+    func onlyTheAdminStartsChats(_ body: JSONObjectValue) async throws {
+        let s = try await Setup()
+        let (app, _) = try await s.core.makeGrant(scopes: [.messagesSend, .chatsManage])
+        #expect(await apiError { _ = try await s.sender.startChat(body, as: .app(app), store: s.core.store, monitor: s.core.monitor) }?.code == "admin_only")
+        let (reader, _) = try await s.core.makeGrant()
+        #expect(await apiError { _ = try await s.sender.startChat(body, as: .app(reader), store: s.core.store, monitor: s.core.monitor) }?.code == "admin_only")
+        for type in ["searchUserByPhoneNumber", "searchPublicChat", "createPrivateChat"] {
+            #expect(await s.core.tdlib.requests(ofType: type).isEmpty)
+        }
+        _ = try await s.sender.startChat(body, as: .admin, store: s.core.store, monitor: s.core.monitor)
+        #expect(await s.core.tdlib.requests(ofType: body["phone"] != nil ? "searchUserByPhoneNumber" : "searchPublicChat").count == 1)
     }
 
     @Test func forwardChecksBothChats() async throws {

@@ -31,7 +31,10 @@ import Testing
             let settings = try await client.call(.patch, path, token: token, body: ["is_pinned": true, "is_archived": false, "is_muted": false])
             #expect(settings.status == 200 && settings.json["chat"]?["id"] == .id(Fixtures.channelId))
             let start = try await client.call(.post, "/v1/chats", token: token, body: ["username": "acmeupdates"])
-            #expect(start.status == 201 && start.json["chat"]?["id"] == .id(Fixtures.channelId))
+            #expect(start.status == 403 && start.json["error"]?["code"] == "admin_only")
+            #expect(await app.tdlib.requests(ofType: "searchPublicChat").isEmpty)
+            let adminStart = try await client.call(.post, "/v1/chats", token: App.adminToken, body: ["username": "acmeupdates"])
+            #expect(adminStart.status == 201 && adminStart.json["chat"]?["id"] == .id(Fixtures.channelId))
         }
     }
 
@@ -52,7 +55,8 @@ import Testing
         let (_, token) = try await app.makeGrant(scopes: [.chatsManage])
         try await app.application.test(.router) { client in
             let refused = try await client.call(.post, "/v1/chats", token: token, body: ["phone": "+15551234567"])
-            #expect(refused.status == 403)
+            #expect(refused.status == 403 && refused.json["error"]?["code"] == "admin_only")
+            #expect(await app.tdlib.requests(ofType: "searchUserByPhoneNumber").isEmpty)
             #expect(await app.tdlib.requests(ofType: "createPrivateChat").isEmpty)
             let started = try await client.call(.post, "/v1/chats", token: App.adminToken, body: ["phone": "+15551234567"])
             #expect(started.status == 201)

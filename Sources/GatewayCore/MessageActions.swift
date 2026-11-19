@@ -141,7 +141,12 @@ extension MessageSender {
         return try await translator.chatInfo(chat, refresh: true)
     }
 
+    /// Opens a chat by username or phone number. Admin only: both look the name or number up
+    /// on Telegram's servers before the gateway knows which chat it is, so no grant can be
+    /// checked first, and an app could use the answers to learn which numbers are on Telegram.
+    /// An app token is refused (`403 admin_only`) before anything is looked up.
     public func startChat(_ body: JSONObjectValue, as principal: Principal, store: Store, monitor: Monitor) async throws -> ChatInfo {
+        guard principal.isAdmin else { throw APIError.adminOnly }
         guard (body["username"] != nil) != (body["phone"] != nil) else { throw APIError.invalidRequest("body", "provide exactly one of username and phone") }
         let key = body["username"] != nil ? "username" : "phone"
         let value = try ActionInput.string(body, key).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -155,17 +160,12 @@ extension MessageSender {
         } else {
             let user = try await perform("searchUserByPhoneNumber", ["phone_number": value, "only_local": false], using: tdlib)
             guard let id = user.object.int64("id") else { throw APIError.internalError("searchUserByPhoneNumber returned no id") }
-            // Private chat ids equal user ids. App callers cannot create ungranted chats.
-            if principal.grant != nil { try await checkAccess(.chatsManage, chats: [id], as: principal) }
             let result = try await perform("createPrivateChat", ["user_id": id, "force": false], using: tdlib)
             guard let resultId = result.object.int64("id") else { throw APIError.internalError("createPrivateChat returned no id") }
             chat = resultId
         }
-        if principal.grant != nil { try await checkAccess(.chatsManage, chats: [chat], as: principal) }
-        else {
-            var set = try await store.monitoredSet()
-            if !set.chatIds.contains(chat) { set.chatIds.append(chat); try await monitor.setMonitoredSet(set) }
-        }
+        var set = try await store.monitoredSet()
+        if !set.chatIds.contains(chat) { set.chatIds.append(chat); try await monitor.setMonitoredSet(set) }
         return try await translator.chatInfo(chat, refresh: true)
     }
 }

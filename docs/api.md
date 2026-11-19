@@ -935,7 +935,7 @@ chat, shows "typing…" or makes the account appear online. Reacting and voting 
 | Remove a reaction | `DELETE /v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | `204` |
 | Vote in a poll | `POST /v1/chats/{chat_id}/messages/{message_id}/poll` | `messages:send` | `204` |
 | Pin, archive, mute | `PATCH /v1/chats/{chat_id}` | `chats:manage` | `200 {"chat": …}` |
-| Start a chat | `POST /v1/chats` | `chats:manage` | `201 {"chat": …}` |
+| Start a chat | `POST /v1/chats` | admin token only | `201 {"chat": …}` |
 
 Messages and chats come back in the [message object](events.md#message-object) and
 [chat object](#the-chat-object) formats. Ids are strings, as everywhere in the API.
@@ -1037,9 +1037,13 @@ stay applied. The response is the chat as it stands afterwards.
 Finds a chat by public username, or a person by phone number (who must allow being found
 that way, or be in the account's contacts), and returns the chat with them. This does not
 join a group or channel and sends nothing; it only makes the chat known to the account. For
-the admin token the chat is then added to the monitored set. An app cannot widen its own
-access this way: the chat it finds must already be in its grant, or the answer is
-`403 chat_not_granted`.
+the admin token the chat is then added to the monitored set.
+
+Only the admin token may start a chat; an app token, whatever its scopes, is answered
+`403 admin_only` before anything is looked up. The lookup asks Telegram's servers about a
+name or number before the gateway knows which chat it is, so no grant can be checked first,
+and its answers would tell an app which phone numbers are on Telegram (bulk lookups like
+that are also what gets accounts flagged).
 
 ### Sending files
 
@@ -1568,7 +1572,7 @@ per-token budget and carry neither header.
 | app | POST | `/v1/chats/{chat_id}/messages/{message_id}/poll` | `messages:send` | Vote in a poll, or take the vote back |
 | app | PATCH | `/v1/chats/{chat_id}` | `chats:manage` | Pin, archive or mute a chat |
 | app | POST | `/v1/chats/{chat_id}/read` | `messages:mark_read` | Mark the chat read as the user |
-| app | POST | `/v1/chats` | `chats:manage` | Find a chat by username or phone number |
+| admin | POST | `/v1/chats` | | Find a chat by username or phone number and monitor it |
 | app | GET, HEAD | `/v1/media/{media_id}` | `media:read` | File bytes |
 | admin | GET | `/v1/admin/status` | | Full status |
 | admin | GET | `/v1/admin/auth` | | Sign-in state |
