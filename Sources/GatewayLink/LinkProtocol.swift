@@ -75,28 +75,71 @@ public enum LinkPolicy {
 
     static let methods: Set<String> = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
 
-    /// Paths that reveal or change the admin token or other secrets, or other links.
-    static let forbiddenPrefixes = ["/v1/admin/secrets", "/v1/admin/tokens", "/v1/admin/links"]
+    /// Every call a link may make, and nothing else: the calls in docs/link.md "What Volgenic
+    /// calls". `*` stands for one path segment of letters, digits, `-` and `_` (a chat, message
+    /// or media id). Everything not listed answers `403 forbidden_over_link`: access requests
+    /// and their tokens, grants and webhook secrets, `/v1/me`, the event log's polling and
+    /// pruning, sign-out, reload, links, and anything added to the API later.
+    static let allowed: [(method: String, path: String)] = [
+        // State
+        ("GET", "/v1/health"),
+        ("GET", "/v1/admin/status"),
+        // Sign-in (not sign-out)
+        ("GET", "/v1/admin/auth"),
+        ("POST", "/v1/admin/auth/qr"),
+        ("POST", "/v1/admin/auth/phone"),
+        ("POST", "/v1/admin/auth/code"),
+        ("POST", "/v1/admin/auth/password"),
+        ("POST", "/v1/admin/auth/email"),
+        ("POST", "/v1/admin/auth/email_code"),
+        // Chats and the monitored set
+        ("GET", "/v1/admin/chats"),
+        ("GET", "/v1/admin/folders"),
+        ("GET", "/v1/admin/monitored-chats"),
+        ("PUT", "/v1/admin/monitored-chats"),
+        // History and media
+        ("GET", "/v1/chats/*/messages"),
+        ("GET", "/v1/media/*"),
+        // Sending and the message and chat actions
+        ("POST", "/v1/chats/*/messages"),
+        ("POST", "/v1/chats/*/forward"),
+        ("PATCH", "/v1/chats/*/messages/*"),
+        ("DELETE", "/v1/chats/*/messages"),
+        ("PUT", "/v1/chats/*/messages/*/reactions"),
+        ("DELETE", "/v1/chats/*/messages/*/reactions"),
+        ("POST", "/v1/chats/*/messages/*/poll"),
+        ("PATCH", "/v1/chats/*"),
+        ("POST", "/v1/chats"),
+        // Marking read
+        ("POST", "/v1/chats/*/read"),
+    ]
 
-    /// Nil when the path may be called over the link; otherwise the error to answer with.
+    static let forbidden = APIError(status: 403, code: "forbidden_over_link", message: "This path cannot be called over the link to Volgenic.")
+
+    /// Nil when the call may be made over the link; otherwise the error to answer with.
     public static func check(method: String, path: String) -> APIError? {
         guard methods.contains(method) else {
             return APIError.invalidRequest("method", "must be one of \(methods.sorted().joined(separator: ", "))")
         }
-        let decoded = (path.removingPercentEncoding ?? path).lowercased()
-        let forbidden = APIError(status: 403, code: "forbidden_over_link", message: "This path cannot be called over the link to Volgenic.")
-        guard path.hasPrefix("/v1/"), decoded.hasPrefix("/v1/") else { return forbidden }
-        // Nothing that could walk out of /v1/ or smuggle a query past `query`.
-        guard !decoded.contains("?"), !decoded.contains("#"), !decoded.contains("//"), !decoded.contains("\\") else { return forbidden }
-        let segments = decoded.split(separator: "/", omittingEmptySubsequences: false)
-        guard !segments.contains(where: { $0 == "." || $0 == ".." }) else { return forbidden }
-        for prefix in forbiddenPrefixes where decoded.hasPrefix(prefix) {
-            return forbidden
-        }
-        if decoded == "/v1/events/stream" {
+        if path == "/v1/events/stream" {
             return APIError.invalidRequest("path", "the event stream is a WebSocket; send a subscribe frame instead")
         }
-        return nil
+        // No percent-encoding at all: the path is matched exactly as the router will see it.
+        guard path.hasPrefix("/v1/"), !path.contains("%") else { return forbidden }
+        let segments = path.split(separator: "/", omittingEmptySubsequences: false)
+        let isAllowed = allowed.contains { rule in
+            guard rule.method == method else { return false }
+            let pattern = rule.path.split(separator: "/", omittingEmptySubsequences: false)
+            guard pattern.count == segments.count else { return false }
+            return zip(pattern, segments).allSatisfy { expected, actual in
+                expected == "*" ? isIdSegment(actual) : expected == actual
+            }
+        }
+        return isAllowed ? nil : forbidden
+    }
+
+    private static func isIdSegment(_ segment: Substring) -> Bool {
+        !segment.isEmpty && segment.count <= 64 && segment.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }
     }
 }
 

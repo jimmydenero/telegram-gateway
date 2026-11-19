@@ -1431,14 +1431,16 @@ to call after every save.
 | Another reload is still running | `409 reload_in_progress` |
 | The old session did not confirm that it closed | `500 internal`. No new session is created; the gateway must be restarted. |
 | App token | `403 admin_only` |
+| Over a link to Volgenic | `403 forbidden_over_link` ([link.md](link.md#what-volgenic-calls)). Were it ever to run over a link, `links` would be left out. |
 
 ---
 
 ## Admin: links to Volgenic
 
 A **link** is an outbound WebSocket from the gateway to a Volgenic server, over which that
-Volgenic account drives the gateway with the admin token's powers, except anything to do
-with secrets. [link.md](link.md) specifies the protocol. Links are added and removed with
+Volgenic account drives the gateway with the admin token, limited to the calls listed in
+[link.md](link.md#what-volgenic-calls): no access requests, grants, tokens or webhook
+secrets, no sign-out, reload or pruning. [link.md](link.md) specifies the protocol. Links are added and removed with
 `tgw link add` and `tgw link remove`, which edit `config.json` and the secret store and then
 call `POST /v1/admin/reload`.
 

@@ -187,13 +187,17 @@ public struct ReloadResult: Sendable, Equatable {
         self.links = links
     }
 
-    public var json: JSONValue {
+    public var json: JSONValue { json(withLinks: true) }
+
+    /// The response body. Over a link to Volgenic `links` is left out (`withLinks: false`): it
+    /// names the base URLs of the other links, which may belong to other Volgenic servers.
+    public func json(withLinks: Bool) -> JSONValue {
         var object: JSONObjectValue = [
             "reloaded": true,
             "telegram": .string(telegram.rawValue),
             "restart_required": .array(restartRequired.map { .string($0) }),
         ]
-        if let links { object["links"] = links.json }
+        if withLinks, let links { object["links"] = links.json }
         return .object(object)
     }
 }

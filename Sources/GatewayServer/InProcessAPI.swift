@@ -9,7 +9,8 @@ import Synchronization
 
 /// Runs requests from a link to Volgenic through the gateway's own router, in this process,
 /// with the admin token: the same middleware (authentication, rate limit, errors) and the
-/// same routes that `tgw` reaches over 127.0.0.1, without a socket.
+/// same routes that `tgw` reaches over 127.0.0.1, without a socket. Only the calls in
+/// `LinkPolicy`'s allowlist get that far; anything else answers `403 forbidden_over_link`.
 public struct InProcessAPI: LinkRequestHandling {
     private let responder: RouterResponder<GatewayRequestContext>
     private let adminToken: String
@@ -22,6 +23,11 @@ public struct InProcessAPI: LinkRequestHandling {
     }
 
     public func perform(_ request: LinkHTTPRequest, maxBodyBytes: Int) async -> LinkHTTPResponse {
+        // The link's allowlist again, here, so nothing reaches the router with the admin token
+        // that the link may not call, whichever way the request arrived.
+        if let refusal = LinkPolicy.check(method: request.method, path: request.path) {
+            return .error(refusal)
+        }
         var headers = HTTPFields()
         headers[.authorization] = "Bearer \(adminToken)"
         headers[.userAgent] = "TelegramGateway-Link/1"

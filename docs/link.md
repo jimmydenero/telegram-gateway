@@ -17,10 +17,13 @@ Durations are written `mm:ss`; values under a minute in seconds, for example `30
 
 ## What a link can do
 
-A link acts with the admin token, so it can do everything the menu bar app can, except see
-or change secrets: sign in and out of Telegram, change the monitored set, approve and revoke
-apps, read every monitored chat's events, history and media, and **send messages as the
-user to every monitored chat**. Link only to a Volgenic account that is yours. A link can also
+A link acts with the admin token, but only for the calls listed under
+[What Volgenic calls](#what-volgenic-calls); the gateway refuses everything else. It can sign
+in to Telegram, change the monitored set, read every monitored chat's events, history and
+media, and **send messages as the user to every monitored chat**. It cannot sign out, see or
+change secrets or tokens, create, approve or deny access requests, see or revoke apps'
+grants, prune the event log, reload the gateway, or see the other links. Link only to a
+Volgenic account that is yours. A link can also
 **mark chats read** (`POST /v1/chats/{chat_id}/read`): Volgenic does this when the person
 opens a chat there, and the senders then see read receipts, as in the Telegram app. The
 gateway still never makes the account appear online, whoever asks.
@@ -150,31 +153,43 @@ through the same authentication, rate limits and error handling that `tgw` meets
   up to `30s` for the download); a request unanswered after `01:00` is Volgenic's to time
   out.
 
-**What a link may not call.** These answer `403` with
-`{"error": {"code": "forbidden_over_link", …}}`, and nothing runs:
+**What a link may call.** Exactly the calls in the table below, by method and path, and
+nothing else. Anything not in it answers `403` with
+`{"error": {"code": "forbidden_over_link", …}}`, and nothing runs. That includes:
 
-- a path that does not start with `/v1/`;
-- `/v1/admin/secrets…`, `/v1/admin/tokens…`, or anything else that would reveal or change
-  the admin token or another secret;
+- a path that does not start with `/v1/`, or that has percent-encoding (`%`) anywhere in it;
+- a listed path with another method (`GET /v1/admin/auth/qr`, `DELETE /v1/admin/monitored-chats`);
+- access requests (`/v1/access-requests…`, `/v1/admin/access-requests…`): a link cannot ask
+  for access, approve or deny a request, or read the token and webhook secret of an approved
+  one;
+- grants (`/v1/admin/grants…`) and `/v1/me…`;
+- `GET /v1/events` (the link has `subscribe` instead), `POST /v1/admin/events/prune`,
+  `POST /v1/admin/auth/logout` and `POST /v1/admin/reload`;
 - `/v1/admin/links…`, the state of this gateway's links, which may include links to other
   Volgenic servers;
-- a path with `.` or `..` segments, `//`, a backslash, or a `?` or `#` (also when
-  percent-encoded).
+- anything added to the API later, until it is added to this table.
+
+In a path, where the table shows `{chat_id}`, `{message_id}` or `{media_id}`, the gateway
+accepts one segment of letters, digits, `-` and `_`; anything else (`.`, `..`, an empty
+segment, a `?` or `#`) is refused. The check runs where the frame is read and again in
+`InProcessAPI`, before the request reaches the router.
 
 `/v1/events/stream` answers `400 invalid_request`: it is a WebSocket, and the link has
 `subscribe` for it. An unknown `method` answers `400 invalid_request` too.
 
 ### What Volgenic calls
 
-All existing endpoints, specified in [api.md](api.md):
+These, specified in [api.md](api.md), and nothing else:
 
 | For | Endpoints |
 |---|---|
-| Sign-in | `GET /v1/admin/auth`, `POST /v1/admin/auth/{qr,phone,code,password,email,email_code,logout}` |
+| Sign-in | `GET /v1/admin/auth`, `POST /v1/admin/auth/{qr,phone,code,password,email,email_code}` (not `logout`) |
 | Chats and the monitored set | `GET /v1/admin/chats` (with `?all=true` the whole chat list), `GET /v1/admin/folders`, `GET` and `PUT /v1/admin/monitored-chats` |
 | History | `GET /v1/chats/{chat_id}/messages?before=…&limit=…` |
 | Media | `GET /v1/media/{media_id}` |
 | Sending | `POST /v1/chats/{chat_id}/messages` with `{"text", "reply_to"}`: the admin token may send to any monitored chat |
+| Actions ([below](#actions-over-the-link)) | `POST /v1/chats/{chat_id}/forward`, `PATCH /v1/chats/{chat_id}/messages/{message_id}`, `DELETE /v1/chats/{chat_id}/messages`, `PUT` and `DELETE /v1/chats/{chat_id}/messages/{message_id}/reactions`, `POST /v1/chats/{chat_id}/messages/{message_id}/poll`, `PATCH /v1/chats/{chat_id}`, `POST /v1/chats` |
+| Marking read ([below](#marking-read-over-the-link)) | `POST /v1/chats/{chat_id}/read` |
 | State | `GET /v1/admin/status` (without its `links` list over a link), `GET /v1/health` |
 
 ### `subscribe` (Volgenic → gateway) and `event`

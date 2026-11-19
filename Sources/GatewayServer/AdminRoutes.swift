@@ -12,7 +12,7 @@ struct AdminRoutes {
 
     func register(on group: RouterGroup<GatewayRequestContext>) {
         group.get("/status") { _, context in try await status(viaLink: context.viaLink) }
-        group.post("/reload") { _, _ in try await reload() }
+        group.post("/reload") { _, context in try await reload(viaLink: context.viaLink) }
         group.get("/links") { _, _ in json(["links": await linksJSON()]) }
         group.get("/auth") { _, _ in try await auth() }
         group.post("/auth/qr") { _, _ in try await authStep { try await deps.telegram.requestQr() } }
@@ -96,12 +96,13 @@ struct AdminRoutes {
     }
 
     /// Re-reads config.json and brings the Telegram session in line with it, without
-    /// touching the event log, grants or open connections.
-    func reload() async throws -> Response {
+    /// touching the event log, grants or open connections. A link may not call this
+    /// (`LinkPolicy`); should one ever reach it, the other links stay out of the answer.
+    func reload(viaLink: Bool = false) async throws -> Response {
         guard let reloader = deps.reloader else { throw APIError.notFound }
         let result = try await reloader.reload()
         deps.logger.info("reload: telegram \(result.telegram.rawValue), restart required for \(result.restartRequired)")
-        return json(result.json)
+        return json(result.json(withLinks: !viaLink))
     }
 
     func auth() async throws -> Response {

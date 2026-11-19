@@ -158,7 +158,7 @@ struct LinkTests {
             #expect(wrong["body"]?["error"]?["details"]?["reason"] == "wrong_code")
 
             // Query parameters reach the route.
-            try await connection.send(["type": "request", "id": "r-4", "method": "GET", "path": "/v1/events", "query": ["since": "0", "limit": "5000"]])
+            try await connection.send(["type": "request", "id": "r-4", "method": "GET", "path": "/v1/admin/chats", "query": ["all": "true", "limit": "5000"]])
             let invalid = try await connection.next(ofType: "response")
             #expect(invalid["status"] == 400)
             #expect(invalid["body"]?["error"]?["details"]?["field"] == "limit")
@@ -212,11 +212,89 @@ struct LinkTests {
     }
 
     @Test func policyAllowsTheEndpointsVolgenicUses() {
-        for path in ["/v1/admin/auth", "/v1/admin/auth/qr", "/v1/admin/chats", "/v1/admin/folders", "/v1/admin/monitored-chats", "/v1/chats/-1001234567890/messages", "/v1/media/med_abc", "/v1/admin/status"] {
-            #expect(LinkPolicy.check(method: "GET", path: path) == nil, "\(path)")
+        let chat = "/v1/chats/-1001234567890"
+        let allowed: [(String, String)] = [
+            ("GET", "/v1/health"), ("GET", "/v1/admin/status"), ("GET", "/v1/admin/auth"),
+            ("POST", "/v1/admin/auth/qr"), ("POST", "/v1/admin/auth/phone"), ("POST", "/v1/admin/auth/code"),
+            ("POST", "/v1/admin/auth/password"), ("POST", "/v1/admin/auth/email"), ("POST", "/v1/admin/auth/email_code"),
+            ("GET", "/v1/admin/chats"), ("GET", "/v1/admin/folders"), ("GET", "/v1/admin/monitored-chats"), ("PUT", "/v1/admin/monitored-chats"),
+            ("GET", "\(chat)/messages"), ("GET", "/v1/media/med_abc"), ("POST", "\(chat)/messages"),
+            ("POST", "\(chat)/forward"), ("PATCH", "\(chat)/messages/1530"), ("DELETE", "\(chat)/messages"),
+            ("PUT", "\(chat)/messages/1530/reactions"), ("DELETE", "\(chat)/messages/1530/reactions"), ("POST", "\(chat)/messages/1530/poll"),
+            ("PATCH", chat), ("POST", "/v1/chats"), ("POST", "\(chat)/read"),
+        ]
+        for (method, path) in allowed {
+            #expect(LinkPolicy.check(method: method, path: path) == nil, "\(method) \(path)")
         }
         #expect(LinkPolicy.check(method: "GET", path: "/v1/events/stream")?.code == "invalid_request")
         #expect(LinkPolicy.check(method: "TRACE", path: "/v1/admin/auth")?.code == "invalid_request")
+    }
+
+    /// An allowlist: a listed path with another method, a path one segment off, and an id
+    /// segment with anything but letters, digits, - and _ are all refused.
+    @Test func policyRefusesEverythingNotListed() {
+        let refused: [(String, String)] = [
+            ("GET", "/v1/admin/auth/qr"), ("DELETE", "/v1/admin/monitored-chats"), ("POST", "/v1/admin/status"),
+            ("GET", "/v1/chats"), ("GET", "/v1/chats/-100123"), ("GET", "/v1/events"), ("GET", "/v1/me"), ("GET", "/v1/me/webhook"),
+            ("POST", "/v1/admin/auth/logout"), ("POST", "/v1/admin/reload"), ("POST", "/v1/admin/events/prune"),
+            ("POST", "/v1/access-requests"), ("GET", "/v1/access-requests/req_1"), ("GET", "/v1/admin/access-requests"),
+            ("POST", "/v1/admin/access-requests/req_1/approve"), ("POST", "/v1/admin/access-requests/req_1/deny"),
+            ("GET", "/v1/admin/grants"), ("GET", "/v1/admin/grants/grant_1"), ("DELETE", "/v1/admin/grants/grant_1"),
+            ("GET", "/v1/admin/links"), ("HEAD", "/v1/media/med_abc"), ("GET", "/v1/media/med_abc/x"),
+            ("GET", "/v1/media/med%5Fabc"), ("GET", "/v1/media/med.abc"), ("GET", "/v1/chats//messages"),
+            ("GET", "/V1/admin/status"), ("GET", "/v1/admin/status/"),
+        ]
+        for (method, path) in refused {
+            #expect(LinkPolicy.check(method: method, path: path)?.code == "forbidden_over_link", "\(method) \(path)")
+        }
+    }
+
+    /// The review's attack, run against the real in-process API: the link cannot create and
+    /// approve its own access request, approve or deny a local app's, read a token or a
+    /// webhook secret, prune the event log, sign out or reload. Nothing runs.
+    @Test func inProcessAPIRefusesWhatALinkMayNotCall() async throws {
+        let gateway = try await Gateway()
+        try await gateway.append(id: 1)
+        let local = try await gateway.deps.accessRequests.create(.init(name: "Local app", description: "Runs on this Mac", scopes: [.messagesRead], requestedChats: nil, webhookUrl: nil))
+        let grant = try await gateway.deps.grants.create(
+            name: "Approved app", description: "Already approved", scopes: [.messagesRead], chats: .list([Fixtures.channelId]),
+            webhookUrl: "https://example.com/hook"
+        ).grant
+        let body = JSONValue.object([
+            "name": "Volgenic", "description": "Over the link", "scopes": ["messages:read"], "requested_chats": "any",
+            "webhook": ["url": "https://attacker.example/hook"],
+        ]).serialized()
+        let calls: [LinkHTTPRequest] = [
+            LinkHTTPRequest(method: "POST", path: "/v1/access-requests", body: body),
+            LinkHTTPRequest(method: "GET", path: "/v1/access-requests/\(local.id)"),
+            LinkHTTPRequest(method: "GET", path: "/v1/admin/access-requests"),
+            LinkHTTPRequest(method: "POST", path: "/v1/admin/access-requests/\(local.id)/approve", body: JSONValue.object(["chats": .array([.id(Fixtures.channelId)])]).serialized()),
+            LinkHTTPRequest(method: "POST", path: "/v1/admin/access-requests/\(local.id)/deny"),
+            LinkHTTPRequest(method: "GET", path: "/v1/admin/grants"),
+            LinkHTTPRequest(method: "GET", path: "/v1/admin/grants/\(grant.id)"),
+            LinkHTTPRequest(method: "GET", path: "/v1/me/webhook"),
+            LinkHTTPRequest(method: "POST", path: "/v1/admin/events/prune", body: JSONValue.object(["before_seq": 100, "force": true]).serialized()),
+            LinkHTTPRequest(method: "POST", path: "/v1/admin/auth/logout"),
+            LinkHTTPRequest(method: "POST", path: "/v1/admin/reload"),
+            LinkHTTPRequest(method: "GET", path: "/v1/admin/links"),
+        ]
+        for call in calls {
+            let response = await gateway.api.perform(call, maxBodyBytes: LinkPolicy.maxBodyBytes)
+            #expect(response.status == 403, "\(call.method) \(call.path)")
+            #expect(try JSONValue.parse(response.body)["error"]?["code"] == "forbidden_over_link", "\(call.method) \(call.path)")
+        }
+        #expect(try await gateway.deps.accessRequests.get(local.id)?.status == .pending)
+        #expect(try await gateway.deps.grants.list(includeRevoked: true).count == 1)
+        #expect(try await gateway.deps.eventLog.headSeq() == 1)
+        #expect(try await gateway.deps.eventLog.oldestSeq() == 1)
+        #expect(await !gateway.telegram.calls.contains("logout"))
+    }
+
+    @Test func reloadAnswerOverALinkLeavesOutTheLinks() {
+        let result = ReloadResult(telegram: .unchanged, restartRequired: [], links: LinkReloadSummary(unchanged: ["https://other.example"]))
+        #expect(result.json["links"]?["unchanged"] == [.string("https://other.example")])
+        #expect(result.json(withLinks: false)["links"] == nil)
+        #expect(result.json(withLinks: false)["reloaded"] == true)
     }
 
     @Test func largeAndBinaryBodies() async throws {

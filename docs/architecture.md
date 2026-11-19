@@ -253,6 +253,10 @@ on the token it holds.
   and media, and send messages as the user to every monitored chat (`tgw send` does this).
   Treat it as equivalent to the user's own access to everything the gateway monitors. There is exactly one; the menu bar app and
   `tgw` read it from the secret store.
+- A **link** to Volgenic runs its requests with the admin token, but only the calls on its
+  allowlist ([link.md](link.md#what-volgenic-calls)): sign-in, chats and the monitored set,
+  history, media, sending and the actions, and status. It cannot touch access requests,
+  grants, tokens or webhook secrets, sign out, reload, prune, or see the other links.
 
 **Tokens are stored as SHA-256 hashes.** The gateway cannot show an app its token again. Two
 narrow exceptions: an approved app's token sits in its access request for the `10:00`
