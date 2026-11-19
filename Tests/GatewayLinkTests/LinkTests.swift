@@ -475,6 +475,14 @@ struct LinkSettingsTests {
         #expect(throws: GatewayError.self) { try LinkSettings.normalize("ftp://volgenic.com") }
         #expect(throws: GatewayError.self) { try LinkSettings.normalize("https://volgenic.com/?x=1") }
         #expect(throws: GatewayError.self) { try LinkSettings.normalize("volgenic.com") }
+        // Plain http (so ws://) only to this Mac: elsewhere the token would cross the network in cleartext.
+        #expect(try LinkSettings.normalize("http://127.0.0.1:4100") == "http://127.0.0.1:4100")
+        #expect(try LinkSettings.normalize("http://LOCALHOST:4100") == "http://localhost:4100")
+        #expect(try LinkSettings.endpoint(for: "http://[::1]:4100").absoluteString == "ws://[::1]:4100/messages/telegram/link")
+        for url in ["http://volgenic.com", "HTTP://Volgenic.com/", "http://10.0.0.5:4100", "http://localhost.volgenic.com", "http://127.0.0.1.nip.io"] {
+            #expect(throws: GatewayError.self, "\(url)") { try LinkSettings.normalize(url) }
+            #expect(throws: GatewayError.self, "\(url)") { try LinkSettings.endpoint(for: url) }
+        }
         #expect(LinkSettings.isValidToken(Gateway.linkToken))
         #expect(!LinkSettings.isValidToken("vgl_short"))
         #expect(!LinkSettings.isValidToken(Gateway.adminToken))
@@ -501,6 +509,13 @@ struct LinkSettingsTests {
         #expect(config.links == [LinkConfig(baseURL: "http://localhost:4100")])
         #expect(try LinkSettings.token(for: "https://volgenic.com", secrets: secrets) == nil)
         #expect(throws: GatewayError.self) { try LinkSettings.add(baseURL: "https://volgenic.com", token: "nope", paths: paths, secrets: secrets) }
+        // tgw link add http://volgenic.com … stores nothing.
+        #expect(throws: GatewayError.self) { try LinkSettings.add(baseURL: "http://volgenic.com", token: Gateway.linkToken, paths: paths, secrets: secrets) }
+        #expect(try LinkSettings.token(for: "http://volgenic.com", secrets: secrets) == nil)
+        #expect(try Config.load(paths: paths, environment: [:]).links == [LinkConfig(baseURL: "http://localhost:4100")])
+        // A config.json edited by hand to name one is refused as well.
+        try #"{"links": [{"base_url": "http://volgenic.com"}]}"#.write(to: paths.config, atomically: true, encoding: .utf8)
+        #expect(throws: GatewayError.self) { try Config.load(paths: paths, environment: [:]) }
     }
 
     @Test func managerRunsIndependentLinksAndReloadsInPlace() async throws {

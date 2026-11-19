@@ -42,14 +42,22 @@ public enum LinkSettings {
         return token.dropFirst(4).allSatisfy { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" || $0 == "_" }
     }
 
-    /// Canonical form of a base URL: `http` or `https`, a host, an optional port and path, no
-    /// query, fragment or credentials, no trailing slash, scheme and host in lowercase.
+    /// Hosts a link may reach over plain `http://` (so `ws://`): this Mac only, as for webhooks.
+    public static let loopbackHosts: Set<String> = ["127.0.0.1", "localhost", "::1", "[::1]"]
+
+    /// Canonical form of a base URL: `https`, or `http` for a loopback host only, a host, an
+    /// optional port and path, no query, fragment or credentials, no trailing slash, scheme
+    /// and host in lowercase. Anywhere else the link token, and then control of the account,
+    /// would cross the network in cleartext.
     public static func normalize(_ raw: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var components = URLComponents(string: trimmed), let scheme = components.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
-            throw GatewayError.invalid("\(raw) is not an http:// or https:// URL")
+            throw GatewayError.invalid("\(raw) is not an https:// URL")
         }
         guard let host = components.host, !host.isEmpty else { throw GatewayError.invalid("\(raw) has no host") }
+        guard scheme == "https" || loopbackHosts.contains(host.lowercased()) else {
+            throw GatewayError.invalid("\(raw) must use https://; http:// is only for 127.0.0.1, localhost or ::1")
+        }
         guard components.user == nil, components.password == nil else { throw GatewayError.invalid("\(raw) must not contain a user name or password") }
         guard components.query == nil, components.fragment == nil else { throw GatewayError.invalid("\(raw) must not have a query or fragment") }
         components.scheme = scheme
@@ -61,8 +69,9 @@ public enum LinkSettings {
         return url
     }
 
-    /// The WebSocket URL for a base URL: `ws://` for `http://`, `wss://` for `https://`, with
-    /// `/messages/telegram/link` appended to the base path.
+    /// The WebSocket URL for a base URL: `wss://` for `https://`, `ws://` for an `http://`
+    /// loopback URL (anything else is refused by `normalize`), with `/messages/telegram/link`
+    /// appended to the base path.
     public static func endpoint(for baseURL: String) throws -> URL {
         guard var components = URLComponents(string: try normalize(baseURL)) else { throw GatewayError.invalid("\(baseURL) is not a valid URL") }
         components.scheme = components.scheme == "https" ? "wss" : "ws"

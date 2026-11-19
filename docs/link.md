@@ -64,8 +64,12 @@ removed link to https://volgenic.com
 ## Connection
 
 The gateway connects to `<base_url>/messages/telegram/link`, with the scheme `wss://` for
-an `https://` base URL and `ws://` for an `http://` one (`http://localhost:4100` in
-development), and sends the token on the upgrade request:
+an `https://` base URL, and sends the token on the upgrade request. The base URL must be
+`https://`: an `http://` one is accepted only for a loopback host (`127.0.0.1`, `localhost`
+or `::1`, as with webhooks), which then uses `ws://` (`http://localhost:4100` in
+development). `tgw link add http://volgenic.com …` is refused, and so is a `config.json`
+naming such a link, because the token and then control of the account would cross the
+network in cleartext:
 
 ```
 GET /messages/telegram/link HTTP/1.1
@@ -287,8 +291,8 @@ the same list under `links`.
 
 in `config.json`, and the token in the secret store under the key
 `link-token:<base_url>` (`secrets.json` by default, never the Keychain while developing).
-The base URL is kept in a canonical form: scheme and host in lowercase, no trailing slash,
-no query. Editing `config.json` by hand and running `tgw daemon reload` has the same effect
+The base URL is kept in a canonical form: `https` (or `http` for a loopback host), scheme
+and host in lowercase, no trailing slash, no query. Editing `config.json` by hand and running `tgw daemon reload` has the same effect
 as `tgw link add` and `remove`, as long as the token is in the secret store.
 
 ## Implementation

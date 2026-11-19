@@ -409,8 +409,9 @@ while developing or testing: tests use the fake TDLib and send nothing.
 ### `tgw link`
 
 Links to Volgenic ([link.md](link.md)): the gateway dials out to a Volgenic server and that
-Volgenic account drives it, with the admin token's powers except secrets, including sending
-messages as you. Volgenic shows the `add` command, with its token, when you link a gateway.
+Volgenic account drives it with the admin token, limited to the calls in
+[link.md](link.md#what-volgenic-calls), including sending messages as you. The base URL must
+be `https://`; `http://` works only for `127.0.0.1`, `localhost` or `::1`. Volgenic shows the `add` command, with its token, when you link a gateway.
 
 ```
 $ tgw link add https://volgenic.com vgl_q3Jf…
