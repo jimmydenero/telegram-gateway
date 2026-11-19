@@ -24,7 +24,7 @@ public actor MessageSender {
     public static let defaultTimeout: Duration = .seconds(30)
     /// How long a send's `idempotency_key` is remembered (docs/api.md "Sending messages").
     public static let idempotencyWindow: TimeInterval = 24 * 3600
-    /// The most keys remembered at once; the oldest finished ones go first.
+    /// The most keys remembered at once; past that the oldest are forgotten first.
     static let idempotencyCapacity = 10_000
 
     /// What Telegram said about one message being sent.

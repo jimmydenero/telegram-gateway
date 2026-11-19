@@ -130,7 +130,7 @@ Volgenic calls the gateway's HTTP API ([api.md](api.md)):
 | Field | Rules |
 |---|---|
 | `id` | Any string (a number is accepted too); echoed in the response. |
-| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH` or `DELETE`. |
+| `method` | `GET`, `HEAD`, `POST`, `PUT`, `PATCH` or `DELETE`; anything else is `400 invalid_request`. Only the method and path pairs in [What Volgenic calls](#what-volgenic-calls) run (none of them is a `HEAD`). |
 | `path` | Starts with `/v1/`. No query string in it: that goes in `query`. |
 | `query` | Optional. An object whose values are strings, or arrays of strings for a parameter that repeats (`{"chat_id": ["-100…", "-100…"]}`). Numbers and booleans are sent as written. |
 | `body` | Optional. Any JSON value; it becomes the request body with `Content-Type: application/json`. |
@@ -145,7 +145,7 @@ through the same authentication, rate limits and error handling that `tgw` meets
 
 - An error is an ordinary response with its status and the error body from
   [api.md](api.md#errors): `{"type": "response", "id": "…", "status": 503, "body": {"error": {"code": "not_logged_in", …}}}`.
-- A response with no body (`204`, or `HEAD`) has `"body": null`.
+- A response with no body (`204`) has `"body": null`.
 - A body that is not JSON (media: `GET /v1/media/{media_id}`) comes as base64, with its
   content type and without `body`:
   `{"type": "response", "id": "…", "status": 200, "content_type": "image/jpeg", "body_base64": "…"}`.
