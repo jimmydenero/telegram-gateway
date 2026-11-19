@@ -10,8 +10,8 @@ extension AppRoutes {
         return id
     }
     func forward(_ request: Request, _ context: GatewayRequestContext) async throws -> Response {
-        let messages = try await deps.sender.forward(jsonBody(request, context), to: actionChat(context), as: context.requirePrincipal())
-        return json(["messages": .array(messages.map(\.json))], status: .created)
+        let result = try await deps.sender.forward(jsonBody(request, context), to: actionChat(context), as: context.requirePrincipal())
+        return json(result.json, status: .created)
     }
     func edit(_ request: Request, _ context: GatewayRequestContext) async throws -> Response {
         let message = try await deps.sender.edit(jsonBody(request, context), chat: actionChat(context), message: actionMessage(context), as: context.requirePrincipal())

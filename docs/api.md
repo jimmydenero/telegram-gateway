@@ -928,7 +928,7 @@ chat, shows "typing…" or makes the account appear online. Reacting and voting 
 | Action | Method and path | Scope | Success |
 |---|---|---|---|
 | Send text or a file | `POST /v1/chats/{chat_id}/messages` | `messages:send` | `201 {"message": …}` |
-| Forward | `POST /v1/chats/{chat_id}/forward` | `messages:send`, for both chats | `201 {"messages": […]}` |
+| Forward | `POST /v1/chats/{chat_id}/forward` | `messages:send`, for both chats | `201 {"messages": […], "not_forwarded": […]}` |
 | Edit | `PATCH /v1/chats/{chat_id}/messages/{message_id}` | `messages:send` | `200 {"message": …}` |
 | Delete | `DELETE /v1/chats/{chat_id}/messages` | `messages:send` | `204` |
 | Add a reaction | `PUT /v1/chats/{chat_id}/messages/{message_id}/reactions` | `messages:send` | `204` |
@@ -954,12 +954,28 @@ records it once.
 ```
 
 Forwards messages from `from_chat_id` into `{chat_id}`. Both chats must pass the chat check.
-`message_ids` holds 1 to 100 distinct ids; they are forwarded oldest first. With
-`send_copy: true` the messages arrive as new messages, without the "Forwarded from" header.
+`message_ids` holds 1 to 20 distinct ids; they are forwarded oldest first. Each message
+counts as one against the limit of 20 sends a minute ([Rate limits](#rate-limits)), so a
+forward of 15 leaves 5; a forward that does not fit in what is left is refused whole with
+`429 rate_limited` and nothing is forwarded. With `send_copy: true` the messages arrive as
+new messages, without the "Forwarded from" header.
+
 Like a send, the gateway waits up to `30s` for Telegram to confirm each forwarded message,
 and returns them with their final ids. Telegram may forward some messages and refuse others,
-and nothing already forwarded is taken back: after an error or `504 send_timeout`, check the
-event stream before forwarding again.
+and nothing already forwarded is taken back, so the answer is still `201` when at least one
+went out, and lists the others in `not_forwarded` with the reason; forward only those again:
+
+```json
+{
+  "messages": [{ "id": "1601", … }],
+  "not_forwarded": [{ "message_id": "1523", "error": { "code": "send_failed", "message": "…" } }]
+}
+```
+
+`not_forwarded` is empty when every message went out. When none did, the answer is the error
+itself (`502 send_failed`, `429 rate_limited` for a flood wait, or `504 send_timeout`). A
+message under `send_timeout`, in `not_forwarded` or as the error, may still go out: check the
+event stream before forwarding it again.
 
 ### Edit
 
@@ -1515,7 +1531,7 @@ Telegram) and the gateway's database.
 |---|---|
 | All requests, per token | 600 per minute |
 | `GET /v1/chats/{chat_id}/messages` | 60 per minute |
-| `POST /v1/chats/{chat_id}/messages` and every [action](#message-and-chat-actions), together | 20 per minute |
+| `POST /v1/chats/{chat_id}/messages` and every [action](#message-and-chat-actions), together | 20 per minute; each message in a forward counts as one |
 | `POST /v1/chats/{chat_id}/read` | 60 per minute |
 | `GET /v1/media/{media_id}`, uncached | 4 concurrent downloads per token |
 | `POST /v1/access-requests` | 10 per minute in total |

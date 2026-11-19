@@ -4,14 +4,15 @@ import TDLibClient
 extension MessageSender {
     /// All mutations share sending's scope, revocation, monitored/granted chat, rate and
     /// live-session checks. No action marks a message read or sends a chat action.
-    func authorize(_ scope: Scope, chats: [Int64], as principal: Principal) async throws -> any TDLibRequesting {
+    func authorize(_ scope: Scope, chats: [Int64], as principal: Principal, cost: Int = 1) async throws -> any TDLibRequesting {
         try await checkAccess(scope, chats: chats, as: principal)
-        return try await limitAndRequireLive(principal)
+        return try await limitAndRequireLive(principal, cost: cost)
     }
 
     /// The shared per-token action budget (the same one as sending), then a live session.
-    func limitAndRequireLive(_ principal: Principal) async throws -> any TDLibRequesting {
-        let decision = await rateLimiter.hit("send:\(principal.rateLimitKey)", limit: Self.sendsPerMinute)
+    /// `cost` is how many messages the action puts into chats: a forward counts each one.
+    func limitAndRequireLive(_ principal: Principal, cost: Int = 1) async throws -> any TDLibRequesting {
+        let decision = await rateLimiter.hit("send:\(principal.rateLimitKey)", limit: Self.sendsPerMinute, cost: cost)
         guard decision.allowed else { throw APIError.rateLimited(retryAfter: decision.retryAfter) }
         return try await telegram.requireLive()
     }
@@ -31,26 +32,68 @@ extension MessageSender {
         catch let error as TDLibError { throw Self.apiError(code: error.code, message: error.message) }
     }
 
-    public func forward(_ body: JSONObjectValue, to chat: Int64, as principal: Principal) async throws -> [Message] {
+    /// The most messages one forward may carry: each counts against the 20 sends a minute.
+    public static let maxForwardMessages = sendsPerMinute
+
+    /// What a forward did. Telegram may forward some messages and refuse others; nothing
+    /// already forwarded is taken back, so the ones that went out are returned with the ones
+    /// that did not, and a client retries only those.
+    public struct ForwardResult: Sendable {
+        public var messages: [Message]
+        /// Public ids of the source messages that were not forwarded, each with the reason.
+        public var notForwarded: [(messageId: Int64, error: APIError)]
+
+        public var json: JSONValue {
+            [
+                "messages": .array(messages.map(\.json)),
+                "not_forwarded": .array(notForwarded.map { item in
+                    ["message_id": .id(item.messageId), "error": ["code": .string(item.error.code), "message": .string(item.error.message)]]
+                }),
+            ]
+        }
+    }
+
+    /// Forwards up to `maxForwardMessages` messages. Each message counts against the shared
+    /// send budget, so a forward can never put more messages into chats than sending one by
+    /// one could. If Telegram forwards only some, the call still answers with those (and the
+    /// rest in `notForwarded`) instead of failing after the fact; it fails only when none went.
+    public func forward(_ body: JSONObjectValue, to chat: Int64, as principal: Principal) async throws -> ForwardResult {
         let source = try ActionInput.id(body, "from_chat_id")
         let ids = try ActionInput.ids(body)
+        guard ids.count <= Self.maxForwardMessages else {
+            throw APIError.invalidRequest("message_ids", "at most \(Self.maxForwardMessages) messages in one forward")
+        }
         let copy = try ActionInput.bool(body, "send_copy")
-        let tdlib = try await authorize(.messagesSend, chats: [chat, source], as: principal)
+        let tdlib = try await authorize(.messagesSend, chats: [chat, source], as: principal, cost: ids.count)
         let result = try await perform("forwardMessages", ["chat_id": chat, "from_chat_id": source, "message_ids": ids, "send_copy": copy, "remove_caption": false], using: tdlib)
         guard let pending = result.object.array("messages"), pending.count == ids.count else { throw APIError.internalError("forwardMessages returned an incomplete result") }
-        let boxes = try pending.map { raw -> JSONBox in
-            guard let object = raw as? JSONObject else { throw APIError.sendFailed(reason: "A message could not be forwarded", telegramCode: 400) }
-            return JSONBox(object)
-        }
         // Register each wait concurrently, so a large batch doesn't lose early verdicts.
-        return try await withThrowingTaskGroup(of: (Int, Message).self) { group in
-            for (index, box) in boxes.enumerated() {
-                group.addTask { (index, try await self.settle(box, chatId: chat)) }
+        let outcomes = await withTaskGroup(of: (Int, Result<Message, APIError>).self) { group in
+            for (index, raw) in pending.enumerated() {
+                guard let object = raw as? JSONObject else {
+                    group.addTask { (index, .failure(APIError.sendFailed(reason: "Telegram did not forward this message", telegramCode: 400))) }
+                    continue
+                }
+                let box = JSONBox(object)
+                group.addTask {
+                    do { return (index, .success(try await self.settle(box, chatId: chat))) }
+                    catch let error as APIError { return (index, .failure(error)) }
+                    catch { return (index, .failure(APIError.internalError("\(error)"))) }
+                }
             }
-            var messages: [(Int, Message)] = []
-            for try await message in group { messages.append(message) }
-            return messages.sorted { $0.0 < $1.0 }.map(\.1)
+            var outcomes: [(Int, Result<Message, APIError>)] = []
+            for await outcome in group { outcomes.append(outcome) }
+            return outcomes.sorted { $0.0 < $1.0 }
         }
+        var forwarded = ForwardResult(messages: [], notForwarded: [])
+        for (index, outcome) in outcomes {
+            switch outcome {
+            case .success(let message): forwarded.messages.append(message)
+            case .failure(let error): forwarded.notForwarded.append((MessageId.toPublic(ids[index]), error))
+            }
+        }
+        if forwarded.messages.isEmpty, let first = forwarded.notForwarded.first { throw first.error }
+        return forwarded
     }
 
     public func edit(_ body: JSONObjectValue, chat: Int64, message: Int64, as principal: Principal) async throws -> Message {

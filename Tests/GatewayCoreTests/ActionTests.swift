@@ -81,6 +81,49 @@ import Testing
         #expect(await s.core.tdlib.requests(ofType: body["phone"] != nil ? "searchUserByPhoneNumber" : "searchPublicChat").count == 1)
     }
 
+    /// One forward used to count as one action whatever it carried, so 100-message forwards
+    /// could put 2,000 messages a minute into chats. Each message now counts, all or nothing.
+    @Test func forwardCountsEachMessageAgainstTheSendLimit() async throws {
+        let s = try await Setup()
+        func forward(_ count: Int) async throws -> MessageSender.ForwardResult {
+            let ids = (0..<count).map { JSONValue.string(String(2000 + $0)) }
+            return try await s.sender.forward(["from_chat_id": .id(Fixtures.channelId), "message_ids": .array(ids)], to: Fixtures.channelId, as: .admin)
+        }
+        await s.core.tdlib.on("forwardMessages") { request in
+            let count = request.array("message_ids")?.count ?? 0
+            let messages: [Any] = (0..<count).map { Fixtures.sentMessage(chatId: Fixtures.channelId, id: Int64(3000 + $0), text: "fwd").object }
+            return ["@type": "messages", "total_count": count, "messages": messages]
+        }
+        let tooMany = await apiError { try await forward(MessageSender.maxForwardMessages + 1) }
+        #expect(tooMany?.code == "invalid_request" && tooMany?.details["field"] == "message_ids")
+        #expect(try await forward(15).messages.count == 15)
+        // 15 + 6 is over 20: refused whole, nothing forwarded, nothing consumed.
+        #expect(await apiError { try await forward(6) }?.code == "rate_limited")
+        #expect(await s.core.tdlib.requests(ofType: "forwardMessages").count == 1)
+        #expect(try await forward(5).messages.count == 5)
+        #expect(await apiError { try await s.run("react") }?.code == "rate_limited")
+        s.core.clock.advance(by: .seconds(60))
+        #expect(try await forward(MessageSender.maxForwardMessages).messages.count == MessageSender.maxForwardMessages)
+    }
+
+    /// Telegram forwarding some messages and not others is answered with what went out and
+    /// what did not, not with a 502 after the fact that a retry would duplicate.
+    @Test func partialForwardReturnsWhatWentOutAndWhatDidNot() async throws {
+        let s = try await Setup()
+        await s.core.tdlib.on("forwardMessages") { _ in
+            ["@type": "messages", "total_count": 2, "messages": [Fixtures.sentMessage(chatId: Fixtures.channelId, id: 1600, text: "fwd").object, NSNull()] as [Any]]
+        }
+        let result = try await s.sender.forward(["from_chat_id": .id(Fixtures.channelId), "message_ids": ["1531", "1530"]], to: Fixtures.channelId, as: .admin)
+        #expect(result.messages.map(\.id) == [1600])
+        #expect(result.notForwarded.map(\.messageId) == [1531])
+        #expect(result.notForwarded.first?.error.code == "send_failed")
+        #expect(result.json["not_forwarded"]?[0]?["message_id"] == "1531")
+
+        // None forwarded is still an error.
+        await s.core.tdlib.on("forwardMessages") { _ in ["@type": "messages", "total_count": 1, "messages": [NSNull()] as [Any]] }
+        #expect(await apiError { try await s.sender.forward(["from_chat_id": .id(Fixtures.channelId), "message_ids": ["1530"]], to: Fixtures.channelId, as: .admin) }?.code == "send_failed")
+    }
+
     @Test func forwardChecksBothChats() async throws {
         let s = try await Setup()
         let (grant, _) = try await s.core.makeGrant(scopes: [.messagesSend])
@@ -270,7 +313,7 @@ import Testing
         await s.core.monitor.handle(update: update)
         await s.core.monitor.handle(update: Fixtures.updateNewMessage(final))
         await s.sender.observe(update)
-        #expect(try await task.value.map(\.id) == [1600])
+        #expect(try await task.value.messages.map(\.id) == [1600])
         #expect(try await s.core.eventLog.page(since: before, limit: 100).events.filter { $0.type == .messageNew }.count == 1)
     }
 }

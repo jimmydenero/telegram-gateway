@@ -25,17 +25,19 @@ public actor RateLimiter {
         self.clock = clock
     }
 
-    /// Consumes one unit of `limit` per `window` seconds for `key`.
-    public func hit(_ key: String, limit: Int, window: TimeInterval = 60) -> Decision {
+    /// Consumes `cost` units (one by default) of `limit` per `window` seconds for `key`, all
+    /// or nothing: a call that would go over the limit consumes none.
+    public func hit(_ key: String, limit: Int, window: TimeInterval = 60, cost: Int = 1) -> Decision {
         let now = clock.now
         var w = windows[key] ?? Window(start: now, count: 0)
         if now.timeIntervalSince(w.start) >= window { w = Window(start: now, count: 0) }
-        if w.count >= limit {
+        let cost = max(cost, 1)
+        if w.count + cost > limit {
             windows[key] = w
             let reset = w.start.addingTimeInterval(window).timeIntervalSince(now)
             return Decision(allowed: false, limit: limit, remaining: 0, retryAfter: max(1, Int(reset.rounded(.up))))
         }
-        w.count += 1
+        w.count += cost
         windows[key] = w
         return Decision(allowed: true, limit: limit, remaining: limit - w.count, retryAfter: 0)
     }
